@@ -2,16 +2,16 @@
 #define INIT_H_INCLUDED
 
 #include <string>
-using namespace std;
 
+// Cree (ou met a jour) toutes les tables de la base au demarrage.
 class Init
 {
     private:
-        string m_connection_string;
+        std::string m_connection_string;
     public:
-        void initTable();
         explicit Init(const std::string& conn_str);
-        string getConnectionString() const;
+        void initTables();
+        std::string getConnectionString() const;
 };
 
 #endif // INIT_H_INCLUDED

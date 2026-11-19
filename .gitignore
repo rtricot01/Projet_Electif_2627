@@ -1,0 +1,11 @@
+# Dossier de compilation (genere par CMake / Visual Studio)
+build/
+out/
+.vs/
+*.obj
+*.pdb
+*.ilk
+*.exe
+
+# Fichiers de configuration locale avec des secrets
+.env
