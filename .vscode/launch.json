@@ -10,6 +10,7 @@
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/build/Debug",
             "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env",
             "preLaunchTask": "Build app"
         }
     ]
