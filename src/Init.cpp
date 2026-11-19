@@ -19,6 +19,9 @@ void Init::initTable() {
         connection conn(m_connection_string);
         work tx(conn);
 
+        // pgcrypto fournit crypt() et gen_salt() pour hacher les mots de passe.
+        tx.exec("CREATE EXTENSION IF NOT EXISTS pgcrypto;");
+
         tx.exec(
             "CREATE TABLE IF NOT EXISTS utilisateurs ("
             "  id SERIAL PRIMARY KEY,"
@@ -28,7 +31,7 @@ void Init::initTable() {
         );
 
         tx.commit();
-        cout << "[BDD] Table 'utilisateurs' pr�te.\n";
+        cout << "[BDD] Table 'utilisateurs' prete.\n";
     } catch (const sql_error& e) {
         cerr << "Erreur SQL lors de l'init : " << e.what() << '\n';
         throw;

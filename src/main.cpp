@@ -2,16 +2,20 @@
 #include <string>
 #include "Init.h"
 #include "User.h"
+#include "Db.h"
 
 using namespace std;
 
 int main()
 {
     cout << "[1/3] Demarrage du programme...\n";
-    string conn_str = "postgresql://neondb_owner:npg_njEle7rF9BVH@ep-rapid-dew-b9l28pba-pooler.c-7.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
 
     try
     {
+        // L'adresse de la base (avec son mot de passe) vient de la variable
+        // d'environnement DATABASE_URL, elle n'est plus ecrite dans le code.
+        string conn_str = db::connectionStringFromEnv();
+
         cout << "[2/3] Tentative de connexion a Neon...\n";
         Init dbInit(conn_str);
 

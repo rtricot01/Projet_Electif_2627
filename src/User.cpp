@@ -1,17 +1,21 @@
 #include "User.h"
 #include <iostream>
 #include <pqxx/pqxx>
+#include <utility>
+#include "Db.h"
 
 using namespace std;
 using namespace pqxx;
 
-User::User(int id, string username, string password, string nom, string prenom){
-    id = id;
-    username = username;
-    password = password;
-    nom = nom;
-    prenom = prenom;
-
+// Les parametres portent le meme nom que les attributs : il faut donc
+// utiliser la liste d'initialisation (sinon "id = id;" ne fait rien).
+User::User(int id, string username, string password, string nom, string prenom)
+    : id(id),
+      username(std::move(username)),
+      password(std::move(password)),
+      nom(std::move(nom)),
+      prenom(std::move(prenom))
+{
 }
 
 UserManager::UserManager(const string& conn_str){
@@ -23,9 +27,10 @@ bool UserManager::registerUser(const string& username, const string& password) {
         connection conn(m_connection_string);
         work tx(conn);
 
-        tx.exec(
-            "INSERT INTO utilisateurs (username, password) VALUES ($1, $2);",
-            pqxx::params{username, password}
+        // Le mot de passe est hache (bcrypt) par PostgreSQL : il n'est jamais stocke en clair.
+        db::exec(tx,
+            "INSERT INTO utilisateurs (username, password) VALUES ($1, crypt($2, gen_salt('bf')));",
+            username, password
         );
 
         tx.commit();
@@ -41,9 +46,10 @@ bool UserManager::authenticate(const string& username, const string& password) {
         pqxx::connection conn(m_connection_string);
         pqxx::work tx(conn);
 
-        pqxx::result res = tx.exec(
-            "SELECT id FROM utilisateurs WHERE username = $1 AND password = $2;",
-            params{username, password}
+        // crypt(motDePasseSaisi, hashStocke) redonne le hash stocke si le mot de passe est bon.
+        pqxx::result res = db::exec(tx,
+            "SELECT id FROM utilisateurs WHERE username = $1 AND password = crypt($2, password);",
+            username, password
         );
 
         return !res.empty();
@@ -59,13 +65,12 @@ std::vector<User> UserManager::getAllUsers() {
         connection conn(m_connection_string);
         work tx(conn);
 
-        result res = tx.exec("SELECT id, username, password FROM utilisateurs ORDER BY id ASC;");
+        result res = tx.exec("SELECT id, username FROM utilisateurs ORDER BY id ASC;");
 
         for (const auto& row : res) {
             User u;
             u.id = row["id"].as<int>();
             u.username = row["username"].as<string>();
-            u.password = row["password"].as<string>();
             users.push_back(u);
         }
     } catch (const sql_error& e) {

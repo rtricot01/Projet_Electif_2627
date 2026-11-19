@@ -11,6 +11,7 @@ set(SOURCES
     src/main.cpp
     src/Init.cpp
     src/User.cpp
+    src/Db.cpp
 )
 
 # Création de l'exécutable
