@@ -252,3 +252,29 @@ StatistiquesPresence EntrainementManager::statistiques(int entrainementId)
     stats.inscrits = ligne[1].as<int>();
     return stats;
 }
+
+vector<LignePresence> EntrainementManager::feuilleDePresence(int entrainementId)
+{
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+
+    vector<LignePresence> feuille;
+    for (const auto& ligne : db::exec(tx,
+             "SELECT u.id, "
+             "       CASE WHEN u.prenom = '' AND u.nom = '' THEN 'licence ' || u.numero_licence "
+             "            ELSE u.prenom || ' ' || u.nom END AS nom_complet, "
+             "       COALESCE(to_char(p.scanne_le, 'HH24:MI'), '') AS heure_scan "
+             "FROM entrainement_inscriptions i "
+             "JOIN utilisateurs u ON u.id = i.utilisateur_id "
+             "LEFT JOIN presences p ON p.entrainement_id = i.entrainement_id AND p.utilisateur_id = i.utilisateur_id "
+             "WHERE i.entrainement_id = $1 "
+             "ORDER BY p.scanne_le IS NULL, p.scanne_le, u.nom, u.prenom;",
+             entrainementId)) {
+        LignePresence presence;
+        presence.utilisateurId = ligne["id"].as<int>();
+        presence.nomComplet = ligne["nom_complet"].as<string>();
+        presence.heureScan = ligne["heure_scan"].as<string>();
+        feuille.push_back(presence);
+    }
+    return feuille;
+}

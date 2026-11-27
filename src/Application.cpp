@@ -544,7 +544,8 @@ void Application::scannerPresences()
     }
 
     titre("SCAN DES PRESENCES");
-    cout << "Scannez (ou collez) le contenu de chaque QR code. Ligne vide pour terminer.\n";
+    cout << "Scannez (ou collez) le contenu de chaque QR code.\n"
+         << "Ligne vide pour terminer et afficher la liste des presents.\n";
     while (true) {
         const string contenu = lireTexte("QR code");
         if (contenu.empty()) {
@@ -571,6 +572,9 @@ void Application::scannerPresences()
         const StatistiquesPresence stats = m_entrainements.statistiques(*id);
         cout << "  -> " << stats.presents << " present(s) sur " << stats.inscrits << " inscrit(s)\n";
     }
+
+    // Fin du scan : liste complete des presents avec leurs noms.
+    afficherFeuilleDePresence(*id);
 }
 
 void Application::voirPresences()
@@ -580,20 +584,35 @@ void Application::voirPresences()
     if (!id) {
         return;
     }
+    afficherFeuilleDePresence(*id);
+}
 
-    const vector<int> presents = m_entrainements.presents(*id);
-    const vector<int> inscrits = m_entrainements.inscrits(*id);
-    const StatistiquesPresence stats = m_entrainements.statistiques(*id);
+// Affiche les noms des presents (avec l'heure du scan) puis ceux des absents.
+void Application::afficherFeuilleDePresence(int entrainementId)
+{
+    const vector<LignePresence> feuille = m_entrainements.feuilleDePresence(entrainementId);
+    const auto nbPresents = count_if(feuille.begin(), feuille.end(),
+                                     [](const LignePresence& l) { return l.estPresent(); });
+    const size_t nbAbsents = feuille.size() - static_cast<size_t>(nbPresents);
 
-    titre("PRESENCES");
-    ostringstream taux;
-    taux.precision(0);
-    taux << fixed << stats.taux();
-    cout << stats.presents << " present(s) sur " << stats.inscrits << " inscrit(s) (" << taux.str() << " %)\n";
+    titre("PRESENTS : " + to_string(nbPresents) + " / " + to_string(feuille.size()) + " inscrits");
+    if (nbPresents == 0) {
+        cout << "  (personne n'a encore ete scanne)\n";
+    }
+    int numero = 1;
+    for (const LignePresence& ligne : feuille) {
+        if (ligne.estPresent()) {
+            cout << "  " << numero++ << ". " << ligne.nomComplet << "  (" << ligne.heureScan << ")\n";
+        }
+    }
 
-    for (int joueurId : inscrits) {
-        const bool present = find(presents.begin(), presents.end(), joueurId) != presents.end();
-        cout << "  [" << (present ? "X" : " ") << "] " << nomJoueur(joueurId) << '\n';
+    if (nbAbsents > 0) {
+        cout << "\nPas encore scannes (" << nbAbsents << ") :\n";
+        for (const LignePresence& ligne : feuille) {
+            if (!ligne.estPresent()) {
+                cout << "  - " << ligne.nomComplet << '\n';
+            }
+        }
     }
 }
 

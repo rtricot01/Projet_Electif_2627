@@ -69,6 +69,7 @@ private:
     void seDesinscrireEntrainement();
     void scannerPresences();
     void voirPresences();
+    void afficherFeuilleDePresence(int entrainementId);
 
     // Matchs
     void afficherMatchs();

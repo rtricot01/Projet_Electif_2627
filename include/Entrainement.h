@@ -39,6 +39,15 @@ struct StatistiquesPresence {
     double taux() const { return inscrits == 0 ? 0.0 : 100.0 * presents / inscrits; }
 };
 
+// Une ligne de la feuille de presence d'une seance.
+struct LignePresence {
+    int utilisateurId = 0;
+    std::string nomComplet;
+    std::string heureScan;   // "HH:MM" ; vide si le joueur n'a pas ete scanne (absent)
+
+    bool estPresent() const { return !heureScan.empty(); }
+};
+
 // Resultat du scan d'un QR code par un responsable.
 enum class ResultatScan {
     PresenceValidee,   // joueur inscrit, presence enregistree
@@ -76,6 +85,10 @@ public:
                                  const std::string& contenuQr, std::optional<Utilisateur>& joueurScanne);
     std::vector<int> presents(int entrainementId);
     StatistiquesPresence statistiques(int entrainementId);
+
+    // Liste des inscrits avec leur nom : d'abord les presents (dans l'ordre des scans),
+    // puis les absents (par ordre alphabetique). Une seule requete, meme avec 50 joueurs.
+    std::vector<LignePresence> feuilleDePresence(int entrainementId);
 };
 
 #endif // ENTRAINEMENT_H_INCLUDED
