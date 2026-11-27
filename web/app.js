@@ -290,28 +290,42 @@ async function pageSeances() {
   const aVenir = seances.filter((s) => (versDate(s.dateHeure)?.getTime() ?? 0) >= limite);
   const passees = seances.filter((s) => (versDate(s.dateHeure)?.getTime() ?? 0) < limite).reverse();
 
-  const carte = (s) => `
+  const carte = (s) => {
+    const placesRestantes = Math.max(0, s.places - s.inscrits);
+    let boutonInscription;
+    if (s.inscrit) {
+      boutonInscription = s.commencee ? "" :
+        `<button class="bouton secondaire petit" data-action="desinscrire" data-id="${s.id}">Me désinscrire</button>`;
+    } else if (s.refusInscription) {
+      boutonInscription = `<p class="info-refus">${esc(s.refusInscription)}</p>`;
+    } else {
+      boutonInscription = `<button class="bouton petit" data-action="inscrire" data-id="${s.id}">M'inscrire</button>`;
+    }
+    return `
     <article class="carte">
       <div class="carte-ligne">
         <div>
           <div class="date-seance">${formaterDate(s.dateHeure)}</div>
           <div class="meta">${esc(s.lieu)} · ${esc(s.equipe)}</div>
-          ${s.description ? `<p class="meta">${esc(s.description)}</p>` : ""}
         </div>
         ${s.inscrit ? `<span class="badge succes">Inscrit</span>` : ""}
       </div>
-      <div class="meta">${s.inscrits} inscrit${s.inscrits > 1 ? "s" : ""}${s.presents ? ` · ${s.presents} présent${s.presents > 1 ? "s" : ""}` : ""}</div>
+      ${badgeSeance(s)}
+      ${s.description ? `<p class="meta">${esc(s.description)}</p>` : ""}
+      <div class="jauge" aria-label="${s.inscrits} inscrits sur ${s.places} places">
+        <div class="jauge-barre"><span style="width:${Math.min(100, Math.round(100 * s.inscrits / s.places))}%"></span></div>
+        <span class="meta">${s.inscrits} / ${s.places} · ${placesRestantes ? `${placesRestantes} place${placesRestantes > 1 ? "s" : ""} libre${placesRestantes > 1 ? "s" : ""}` : "complet"}${s.presents ? ` · ${s.presents} présent${s.presents > 1 ? "s" : ""}` : ""}</span>
+      </div>
       <div class="carte-actions">
-        ${s.inscrit
-          ? `<button class="bouton secondaire petit" data-action="desinscrire" data-id="${s.id}">Me désinscrire</button>`
-          : `<button class="bouton petit" data-action="inscrire" data-id="${s.id}">M'inscrire</button>`}
+        ${boutonInscription}
         ${estAdmin() ? `
           <a class="bouton petit" href="#/seances/${s.id}/scan">Scanner</a>
-          <a class="bouton secondaire petit" href="#/seances/${s.id}/presences">Présences</a>
+          <a class="bouton secondaire petit" href="#/seances/${s.id}/presences">Inscrits</a>
           <button class="bouton secondaire petit" data-action="modifier" data-id="${s.id}">Modifier</button>
           <button class="bouton danger petit" data-action="supprimer" data-id="${s.id}">Supprimer</button>` : ""}
       </div>
     </article>`;
+  };
 
   contenu.innerHTML = `
     <div class="barre-titre">
@@ -353,6 +367,22 @@ async function pageSeances() {
   };
 }
 
+function badgeSeance(s) {
+  if (s.type === "A") {
+    return `<p class="type-seance"><span class="badge acad">Semaine A</span>
+      <span class="meta">Priorité loisirs · compétition à partir du ${esc(s.ouvertureCompetition)}</span></p>`;
+  }
+  if (s.type === "B") {
+    return `<p class="type-seance"><span class="badge cfe">Semaine B</span>
+      <span class="meta">Réservée aux joueurs compétition</span></p>`;
+  }
+  return "";
+}
+
+function badgeType(competition) {
+  return competition ? `<span class="badge cfe">Compét.</span>` : `<span class="badge">Loisir</span>`;
+}
+
 async function optionsEquipes(selection, avecAucune) {
   const equipes = await api("GET", "/api/equipes");
   return (avecAucune ? `<option value="">Toutes équipes</option>` : "") + equipes.map((e) =>
@@ -373,6 +403,15 @@ async function formulaireSeance(seance) {
         <input type="datetime-local" name="dateHeure" required value="${esc(versChampDate(seance?.dateHeure))}"></label>
       <label class="champ"><span>Lieu</span>
         <input name="lieu" required value="${esc(seance?.lieu)}" placeholder="Gymnase INSA"></label>
+      <label class="champ"><span>Type de séance</span>
+        <select name="type">
+          <option value="ouverte" ${!seance || seance.type === "ouverte" ? "selected" : ""}>Ouverte à tous</option>
+          <option value="A" ${seance?.type === "A" ? "selected" : ""}>Semaine A : priorité aux loisirs</option>
+          <option value="B" ${seance?.type === "B" ? "selected" : ""}>Semaine B : compétition uniquement</option>
+        </select>
+        <div class="aide">Semaine A : les joueurs compétition peuvent s'inscrire 48 h avant la séance.</div></label>
+      <label class="champ"><span>Nombre de places</span>
+        <input type="number" name="places" min="1" max="500" required value="${seance?.places ?? 50}" inputmode="numeric"></label>
       <label class="champ"><span>Équipe</span>
         <select name="equipeId">${options}</select>
         ${seance ? "" : `<div class="aide">Les joueurs de l'équipe choisie sont inscrits automatiquement.</div>`}</label>
@@ -384,6 +423,8 @@ async function formulaireSeance(seance) {
         lieu: donnees.get("lieu").trim(),
         equipeId: donnees.get("equipeId") ? Number(donnees.get("equipeId")) : null,
         description: donnees.get("description").trim(),
+        type: donnees.get("type"),
+        places: Number(donnees.get("places")),
       };
       if (seance) {
         await api("PUT", `/api/entrainements/${seance.id}`, corps);
@@ -418,18 +459,90 @@ function htmlFeuille(feuille) {
 
 async function pagePresences(id) {
   chargement();
+  let feuille;
   try {
-    const feuille = await api("GET", `/api/entrainements/${id}/presences`);
-    contenu.innerHTML = `
-      <div class="barre-titre">
-        <h1>Présences</h1>
-        <a class="bouton petit" href="#/seances/${id}/scan">Scanner</a>
-      </div>
-      ${htmlFeuille(feuille)}
-      <p><a href="#/seances">← Retour aux séances</a></p>`;
+    feuille = await api("GET", `/api/entrainements/${id}/presences`);
   } catch (e) {
-    afficherErreurPage(e);
+    return afficherErreurPage(e);
   }
+  const ligne = (p) => `
+    <li>
+      <span>${p.heure ? "✓ " : ""}${esc(p.nom)} ${badgeType(p.competition)}</span>
+      <span>${p.heure ? `<span class="heure">${esc(p.heure)}</span>` : ""}
+        <button class="bouton danger petit" data-retirer="${p.id}" aria-label="Retirer ${esc(p.nom)}">Retirer</button></span>
+    </li>`;
+
+  contenu.innerHTML = `
+    <div class="barre-titre">
+      <h1>Inscrits</h1>
+      <a class="bouton petit" href="#/seances/${id}/scan">Scanner</a>
+    </div>
+    <div class="carte">
+      <div class="carte-ligne">
+        <div><div class="meta">Inscrits · présents</div>
+          <div class="compteur">${feuille.inscrits} · ${feuille.presents.length}</div></div>
+        <button class="bouton petit" id="ajouter-inscrit">+ Ajouter un joueur</button>
+      </div>
+    </div>
+    <div class="carte">
+      ${feuille.inscrits ? `<ul class="liste-noms">${[...feuille.presents, ...feuille.absents].map(ligne).join("")}</ul>`
+                         : `<p class="vide">Personne n'est inscrit.</p>`}
+    </div>
+    <p><a href="#/seances">← Retour aux séances</a></p>`;
+
+  contenu.onclick = async (evenement) => {
+    const bouton = evenement.target.closest("button[data-retirer]");
+    if (!bouton) return;
+    const joueur = [...feuille.presents, ...feuille.absents].find((p) => p.id === Number(bouton.dataset.retirer));
+    if (!confirm(`Retirer ${joueur.nom} de la séance ?`)) return;
+    try {
+      await api("DELETE", `/api/entrainements/${id}/inscrits/${joueur.id}`);
+      notifier(`${joueur.nom} a été retiré.`);
+      pagePresences(id);
+    } catch (e) {
+      notifier(e.message, true);
+    }
+  };
+
+  document.getElementById("ajouter-inscrit").addEventListener("click", async () => {
+    let membres;
+    try {
+      membres = await api("GET", "/api/membres");
+    } catch (e) {
+      return notifier(e.message, true);
+    }
+    const dejaInscrits = new Set([...feuille.presents, ...feuille.absents].map((p) => p.id));
+    const disponibles = membres.filter((m) => !dejaInscrits.has(m.id));
+    ouvrirFenetre({
+      titre: "Ajouter des joueurs",
+      texteValider: "Ajouter",
+      html: `
+        <p class="aide">Un admin peut ajouter un joueur même si la séance est complète ou réservée.</p>
+        <input type="search" id="recherche-ajout" placeholder="Rechercher un joueur" aria-label="Rechercher un joueur" style="margin-bottom:8px;width:100%">
+        <div class="cases">${disponibles.map((m) => `
+          <label data-nom="${esc((m.nomComplet + " " + m.numeroLicence).toLowerCase())}">
+            <input type="checkbox" name="joueurs" value="${m.id}">
+            <span>${esc(m.nomComplet)} ${badgeType(m.typeJoueur === "competition")}</span>
+          </label>`).join("") || `<p class="meta">Tous les membres sont déjà inscrits.</p>`}</div>`,
+      apresOuverture: (formulaire) => {
+        formulaire.querySelector("#recherche-ajout").addEventListener("input", (evenement) => {
+          const recherche = evenement.target.value.toLowerCase().trim();
+          for (const ligneCase of formulaire.querySelectorAll(".cases label")) {
+            ligneCase.hidden = recherche !== "" && !ligneCase.dataset.nom.includes(recherche);
+          }
+        });
+      },
+      valider: async (donnees) => {
+        const ids = donnees.getAll("joueurs").map(Number);
+        if (!ids.length) throw new Error("Cochez au moins un joueur.");
+        for (const utilisateurId of ids) {
+          await api("POST", `/api/entrainements/${id}/inscrits`, { utilisateurId });
+        }
+        notifier(`${ids.length} joueur${ids.length > 1 ? "s" : ""} ajouté${ids.length > 1 ? "s" : ""}.`);
+        pagePresences(id);
+      },
+    });
+  });
 }
 
 function arreterScan() {
@@ -842,7 +955,7 @@ async function pageMembres() {
       <h2>Importer la liste des joueurs</h2>
       <p class="meta">Dans Excel : Fichier › Enregistrer sous › « CSV UTF-8 » (ou « CSV séparateur point-virgule »).
         La première ligne doit contenir au moins les colonnes <strong>Nom</strong> et <strong>Licence</strong>
-        (Prénom et Filière sont aussi reconnus).</p>
+        (Prénom, Filière et <strong>Type</strong> — loisir ou compétition — sont aussi reconnus).</p>
       <label class="bouton secondaire">Choisir le fichier CSV
         <input type="file" id="fichier-csv" accept=".csv,text/csv" hidden></label>
       <div id="apercu-import"></div>
@@ -860,14 +973,18 @@ async function pageMembres() {
             <div>
               <h3>${esc(m.nomComplet)}</h3>
               <div class="meta">Licence ${esc(m.numeroLicence)}${m.filiere ? " · " + esc(m.filiere) : ""}</div>
+              ${m.dansUneEquipe && m.typeDeclare === "loisir" ? `<div class="meta">Compétition car membre d'une équipe</div>` : ""}
             </div>
-            <div>
-              ${m.admin ? `<span class="badge cfe">Admin</span>` : ""}
+            <div class="badges">
+              ${badgeType(m.typeJoueur === "competition")}
+              ${m.admin ? `<span class="badge acad">Admin</span>` : ""}
               ${m.compteActive ? "" : `<span class="badge">Pas activé</span>`}
             </div>
           </div>
-          ${m.id === etat.membre.id ? "" : `
-            <div class="carte-actions">
+          <div class="carte-actions">
+            <button class="bouton secondaire petit" data-action="type" data-id="${m.id}">
+              ${m.typeDeclare === "competition" ? "Passer loisir" : "Passer compétition"}</button>
+          ${m.id === etat.membre.id ? "</div>" : `
               <button class="bouton secondaire petit" data-action="statut" data-id="${m.id}" data-admin="${m.admin}">
                 ${m.admin ? "Retirer admin" : "Passer admin"}</button>
               ${m.compteActive ? `<button class="bouton secondaire petit" data-action="reinitialiser" data-id="${m.id}">Réinitialiser le mot de passe</button>` : ""}
@@ -894,7 +1011,7 @@ async function pageMembres() {
           ${apercu.avertissements.map((a) => `<p class="meta">⚠ ${esc(a)}</p>`).join("")}
           <p><strong>${apercu.total} joueur${apercu.total > 1 ? "s" : ""} trouvé${apercu.total > 1 ? "s" : ""}</strong>, par exemple :</p>
           <ul class="liste-noms">${apercu.apercu.map((j) =>
-            `<li><span>${esc(j.prenom)} ${esc(j.nom)}</span><span class="meta">${esc(j.licence)}${j.filiere ? " · " + esc(j.filiere) : ""}</span></li>`).join("")}</ul>
+            `<li><span>${esc(j.prenom)} ${esc(j.nom)}</span><span class="meta">${esc(j.licence)}${j.filiere ? " · " + esc(j.filiere) : ""}${j.type ? " · " + (j.type === "competition" ? "compétition" : "loisir") : ""}</span></li>`).join("")}</ul>
           ${apercu.total ? `<button class="bouton" id="confirmer-import" style="margin-top:8px">Importer ces ${apercu.total} joueurs</button>` : ""}
         </div>`;
       document.getElementById("confirmer-import")?.addEventListener("click", async () => {
@@ -918,7 +1035,11 @@ async function pageMembres() {
     if (!bouton) return;
     const membre = membres.find((m) => m.id === Number(bouton.dataset.id));
     try {
-      if (bouton.dataset.action === "statut") {
+      if (bouton.dataset.action === "type") {
+        const nouveau = membre.typeDeclare === "competition" ? "loisir" : "competition";
+        await api("PUT", `/api/membres/${membre.id}/type`, { type: nouveau });
+        notifier(`${membre.nomComplet} : ${nouveau === "competition" ? "compétition" : "loisir"}.`);
+      } else if (bouton.dataset.action === "statut") {
         const devientAdmin = !membre.admin;
         if (!confirm(devientAdmin ? `Donner les droits admin à ${membre.nomComplet} ?`
                                   : `Retirer les droits admin de ${membre.nomComplet} ?`)) return;

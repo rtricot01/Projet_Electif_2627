@@ -54,6 +54,10 @@ void Init::initTables() {
         // Mot de passe vide (NULL) = joueur importe depuis la liste du club,
         // qui n'a pas encore fait sa premiere connexion.
         tx.exec("ALTER TABLE utilisateurs ALTER COLUMN password DROP NOT NULL;");
+        tx.exec(
+            "ALTER TABLE utilisateurs ADD COLUMN IF NOT EXISTS type_joueur VARCHAR(12) NOT NULL DEFAULT 'loisir'"
+            "  CHECK (type_joueur IN ('loisir', 'competition'));"
+        );
 
         // ----- Equipes
         tx.exec(
@@ -80,6 +84,13 @@ void Init::initTables() {
             "  equipe_id INT REFERENCES equipes(id) ON DELETE SET NULL,"
             "  description TEXT NOT NULL DEFAULT ''"
             ");"
+        );
+        // Semaine A (priorite loisirs), semaine B (competition uniquement) ou ouverte a tous.
+        tx.exec(
+            "ALTER TABLE entrainements"
+            "  ADD COLUMN IF NOT EXISTS type_seance VARCHAR(10) NOT NULL DEFAULT 'ouverte'"
+            "      CHECK (type_seance IN ('ouverte', 'A', 'B')),"
+            "  ADD COLUMN IF NOT EXISTS places INT NOT NULL DEFAULT 50 CHECK (places > 0);"
         );
         tx.exec(
             "CREATE TABLE IF NOT EXISTS entrainement_inscriptions ("
@@ -134,5 +145,20 @@ void Init::initTables() {
     } catch (const sql_error& e) {
         cerr << "Erreur SQL lors de l'init : " << e.what() << '\n';
         throw;
+    }
+
+    // Les dates sont saisies a l'heure de Strasbourg, mais Neon est regle sur l'heure UTC :
+    // on regle la base sur Europe/Paris (heures de scan, seance commencee, semaine A).
+    try {
+        connection conn(m_connection_string);
+        work tx(conn);
+        tx.exec(
+            "DO $$ BEGIN"
+            "  EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'Europe/Paris');"
+            "END $$;"
+        );
+        tx.commit();
+    } catch (const sql_error& e) {
+        cerr << "[BDD] Attention : fuseau horaire non regle (" << e.what() << ")\n";
     }
 }

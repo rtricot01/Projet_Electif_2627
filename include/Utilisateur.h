@@ -13,6 +13,12 @@ enum class Statut { Client, Admin };
 std::string statutVersTexte(Statut statut);
 Statut statutDepuisTexte(const std::string& texte);
 
+// Pratique du joueur : loisir ou competition (sert aux semaines A et B).
+enum class TypeJoueur { Loisir, Competition };
+
+std::string typeJoueurVersTexte(TypeJoueur type);
+TypeJoueur typeJoueurDepuisTexte(const std::string& texte);
+
 // Un membre de l'AS Volley.
 // L'identifiant de connexion est le numero de licence.
 class Utilisateur {
@@ -25,6 +31,8 @@ private:
     Statut m_statut = Statut::Client;
     std::string m_qrToken;      // code secret unique contenu dans le QR code du joueur
     bool m_compteActive = false; // faux tant que le joueur n'a pas choisi son mot de passe
+    TypeJoueur m_typeDeclare = TypeJoueur::Loisir; // d'apres la liste Excel ou un admin
+    bool m_dansUneEquipe = false;  // un joueur d'une equipe joue forcement en competition
 
 public:
     // Prefixe ecrit dans chaque QR code, pour reconnaitre nos QR codes.
@@ -32,7 +40,8 @@ public:
 
     Utilisateur() = default;
     Utilisateur(int id, std::string numeroLicence, std::string nom, std::string prenom,
-                std::string filiere, Statut statut, std::string qrToken, bool compteActive);
+                std::string filiere, Statut statut, std::string qrToken, bool compteActive,
+                TypeJoueur typeDeclare = TypeJoueur::Loisir, bool dansUneEquipe = false);
 
     int getId() const { return m_id; }
     const std::string& getNumeroLicence() const { return m_numeroLicence; }
@@ -44,6 +53,10 @@ public:
 
     bool estAdmin() const { return m_statut == Statut::Admin; }
     bool compteActive() const { return m_compteActive; }
+    TypeJoueur getTypeDeclare() const { return m_typeDeclare; }
+    bool estDansUneEquipe() const { return m_dansUneEquipe; }
+    // Competition si la liste le dit OU si le joueur fait partie d'une equipe.
+    TypeJoueur typeJoueur() const;
     std::string nomComplet() const;
 
     // Texte a mettre dans le QR code du joueur (ex : "ASVOLLEY:3f9a...").
@@ -56,6 +69,7 @@ struct JoueurImporte {
     std::string nom;
     std::string prenom;
     std::string filiere;
+    std::string typeJoueur; // "loisir", "competition" ou "" (non precise dans le fichier)
 };
 
 // Bilan d'un import de la liste des joueurs.
@@ -119,6 +133,9 @@ public:
 
     // Admin uniquement : passer un membre en admin ou en client.
     void changerStatut(const Utilisateur& auteur, int utilisateurId, Statut statut);
+
+    // Admin uniquement : changer le type declare (loisir / competition) d'un joueur.
+    void changerTypeJoueur(const Utilisateur& auteur, int utilisateurId, TypeJoueur type);
 
     // Admin uniquement : supprimer un compte.
     void supprimer(const Utilisateur& auteur, int utilisateurId);

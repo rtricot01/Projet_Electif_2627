@@ -144,6 +144,14 @@ a { color: var(--primaire); }
 .liste-noms li:last-child { border-bottom: 0; }
 .liste-noms .heure { color: var(--texte-doux); font-variant-numeric: tabular-nums; }
 
+.type-seance { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 8px 0 4px; }
+.jauge { margin-top: 8px; }
+.jauge-barre { height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin-bottom: 4px; }
+.jauge-barre span { display: block; height: 100%; background: var(--primaire); border-radius: 999px; }
+.info-refus { margin: 0; color: var(--attention); background: var(--attention-fond); padding: 6px 10px; border-radius: 8px; font-size: .9rem; }
+.badges { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.liste-noms li > span:last-child { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
 /* ------------------------------------------------------------ boutons et formulaires */
 .bouton {
   appearance: none; border: 0; cursor: pointer;
@@ -229,4 +237,11 @@ a { color: var(--primaire); }
 
 @media (min-width: 700px) {
   .contenu { padding-top: 24px; }
+}
+
+/* Champs de recherche dans les fenetres (ajout de joueurs, composition d'equipe) */
+.fenetre input[type="search"] {
+  width: 100%; font: inherit; color: var(--texte);
+  background: var(--surface); border: 1px solid var(--bordure);
+  border-radius: 10px; padding: 10px 12px; min-height: 44px;
 }

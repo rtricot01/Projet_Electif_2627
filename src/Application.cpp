@@ -201,6 +201,8 @@ void Application::menuPrincipal()
                 {"Me desinscrire d'un entrainement", [this] { seDesinscrireEntrainement(); }},
                 {"Scanner les QR codes (valider les presences)", [this] { scannerPresences(); }, true},
                 {"Voir les presences d'une seance", [this] { voirPresences(); }, true},
+                {"Ajouter un joueur a une seance", [this] { ajouterInscrit(); }, true},
+                {"Retirer un joueur d'une seance", [this] { retirerInscrit(); }, true},
                 {"Creer un entrainement", [this] { creerEntrainement(); }, true},
                 {"Modifier un entrainement", [this] { modifierEntrainement(); }, true},
                 {"Supprimer un entrainement", [this] { supprimerEntrainement(); }, true},
@@ -280,6 +282,7 @@ void Application::afficherMembres()
              << " - licence " << u.getNumeroLicence()
              << " - " << (u.getFiliere().empty() ? "filiere ?" : u.getFiliere())
              << (u.estAdmin() ? " - ADMIN" : "")
+             << " - " << typeJoueurVersTexte(u.typeJoueur()) << (u.estDansUneEquipe() ? " (equipe)" : "")
              << (u.compteActive() ? "" : " - compte pas encore active") << '\n';
     }
 }
@@ -453,9 +456,11 @@ void Application::afficherEntrainements()
     }
     for (const Entrainement& e : entrainements) {
         const StatistiquesPresence stats = m_entrainements.statistiques(e.getId());
+        const char* type = e.getType() == TypeSeance::A ? " - semaine A (priorite loisirs)"
+                         : e.getType() == TypeSeance::B ? " - semaine B (competition)" : "";
         cout << "[" << e.getId() << "] " << e.getDateHeure() << " - " << e.getLieu()
-             << " - " << nomEquipe(e.getEquipeId())
-             << " - " << stats.inscrits << " inscrit(s)"
+             << " - " << nomEquipe(e.getEquipeId()) << type
+             << " - " << stats.inscrits << "/" << e.getPlaces() << " inscrit(s)"
              << (m_entrainements.estInscrit(e.getId(), m_connecte->getId()) ? " (vous etes inscrit)" : "") << '\n';
         if (!e.getDescription().empty()) {
             cout << "     " << e.getDescription() << '\n';
@@ -466,12 +471,15 @@ void Application::afficherEntrainements()
 void Application::creerEntrainement()
 {
     titre("CREER UN ENTRAINEMENT");
-    const string dateHeure = lireTexte("Date et heure (AAAA-MM-JJ HH:MM)");
-    const string lieu = lireTexte("Lieu");
-    const optional<int> equipe = choisirEquipe(true);
-    const string description = lireTexte("Description (facultatif)");
+    ParametresSeance parametres;
+    parametres.dateHeure = lireTexte("Date et heure (AAAA-MM-JJ HH:MM)");
+    parametres.lieu = lireTexte("Lieu");
+    parametres.equipeId = choisirEquipe(true);
+    parametres.description = lireTexte("Description (facultatif)");
+    parametres.type = choisirTypeSeance(TypeSeance::Ouverte);
+    parametres.places = lireEntier("Nombre de places [50]").value_or(50);
 
-    const Entrainement e = m_entrainements.creer(*m_connecte, dateHeure, lieu, equipe, description);
+    const Entrainement e = m_entrainements.creer(*m_connecte, parametres);
     cout << "Entrainement cree (n" << e.getId() << "), "
          << m_entrainements.statistiques(e.getId()).inscrits << " joueur(s) inscrit(s) automatiquement.\n";
 }
@@ -487,11 +495,14 @@ void Application::modifierEntrainement()
     if (!e) {
         throw DonneeInvalide("Cet entrainement n'existe pas.");
     }
-    const string dateHeure = lireTexte("Date et heure (AAAA-MM-JJ HH:MM)", e->getDateHeure());
-    const string lieu = lireTexte("Lieu", e->getLieu());
-    const optional<int> equipe = choisirEquipe(true, e->getEquipeId());
-    const string description = lireTexte("Description", e->getDescription());
-    m_entrainements.modifier(*m_connecte, *id, dateHeure, lieu, equipe, description);
+    ParametresSeance parametres = e->getParametres();
+    parametres.dateHeure = lireTexte("Date et heure (AAAA-MM-JJ HH:MM)", e->getDateHeure());
+    parametres.lieu = lireTexte("Lieu", e->getLieu());
+    parametres.equipeId = choisirEquipe(true, e->getEquipeId());
+    parametres.description = lireTexte("Description", e->getDescription());
+    parametres.type = choisirTypeSeance(e->getType());
+    parametres.places = lireEntier("Nombre de places [" + to_string(e->getPlaces()) + "]").value_or(e->getPlaces());
+    m_entrainements.modifier(*m_connecte, *id, parametres);
     cout << "Entrainement modifie.\n";
 }
 
@@ -515,7 +526,8 @@ void Application::sInscrireEntrainement()
     if (!id) {
         return;
     }
-    m_entrainements.inscrire(*id, m_connecte->getId());
+    rechargerUtilisateurConnecte(); // type loisir / competition a jour
+    m_entrainements.inscrire(*id, *m_connecte);
     cout << "Vous etes inscrit.\n";
 }
 
@@ -528,6 +540,55 @@ void Application::seDesinscrireEntrainement()
     }
     m_entrainements.desinscrire(*id, m_connecte->getId());
     cout << "Vous etes desinscrit.\n";
+}
+
+// L'admin peut ajouter un joueur meme si la seance est pleine ou reservee.
+void Application::ajouterInscrit()
+{
+    afficherEntrainements();
+    const optional<int> seance = lireEntier("Numero de l'entrainement");
+    if (!seance) {
+        return;
+    }
+    afficherMembres();
+    const optional<int> joueur = lireEntier("Numero du joueur a ajouter");
+    if (!joueur) {
+        return;
+    }
+    m_entrainements.ajouterInscrit(*m_connecte, *seance, *joueur);
+    cout << nomJoueur(*joueur) << " est inscrit.\n";
+}
+
+void Application::retirerInscrit()
+{
+    afficherEntrainements();
+    const optional<int> seance = lireEntier("Numero de l'entrainement");
+    if (!seance) {
+        return;
+    }
+    afficherFeuilleDePresence(*seance);
+    const optional<int> joueur = lireEntier("Numero (id) du joueur a retirer");
+    if (!joueur) {
+        return;
+    }
+    m_entrainements.retirerInscrit(*m_connecte, *seance, *joueur);
+    cout << nomJoueur(*joueur) << " est retire de la seance.\n";
+}
+
+TypeSeance Application::choisirTypeSeance(TypeSeance actuel)
+{
+    const string saisie = lireTexte("Type : 0 = ouverte a tous, A = semaine A (priorite loisirs), "
+                                    "B = semaine B (competition) [" + typeSeanceVersTexte(actuel) + "]");
+    if (saisie == "A" || saisie == "a") {
+        return TypeSeance::A;
+    }
+    if (saisie == "B" || saisie == "b") {
+        return TypeSeance::B;
+    }
+    if (saisie == "0") {
+        return TypeSeance::Ouverte;
+    }
+    return actuel;
 }
 
 // Le responsable scanne le QR code de chaque joueur. Une application de scan
@@ -602,7 +663,8 @@ void Application::afficherFeuilleDePresence(int entrainementId)
     int numero = 1;
     for (const LignePresence& ligne : feuille) {
         if (ligne.estPresent()) {
-            cout << "  " << numero++ << ". " << ligne.nomComplet << "  (" << ligne.heureScan << ")\n";
+            cout << "  " << numero++ << ". " << ligne.nomComplet << "  (" << ligne.heureScan << ")  [id "
+                 << ligne.utilisateurId << "]\n";
         }
     }
 
@@ -610,7 +672,7 @@ void Application::afficherFeuilleDePresence(int entrainementId)
         cout << "\nPas encore scannes (" << nbAbsents << ") :\n";
         for (const LignePresence& ligne : feuille) {
             if (!ligne.estPresent()) {
-                cout << "  - " << ligne.nomComplet << '\n';
+                cout << "  - " << ligne.nomComplet << "  [id " << ligne.utilisateurId << "]\n";
             }
         }
     }

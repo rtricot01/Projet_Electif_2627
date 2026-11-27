@@ -165,7 +165,7 @@ string normaliserTitre(const string& titre)
 }
 
 struct Colonnes {
-    optional<size_t> licence, nom, prenom, filiere;
+    optional<size_t> licence, nom, prenom, filiere, type;
 };
 
 Colonnes reconnaitreColonnes(const vector<string>& titres)
@@ -183,6 +183,11 @@ Colonnes reconnaitreColonnes(const vector<string>& titres)
                    && (t.find("filiere") != string::npos || t.find("departement") != string::npos
                        || t == "spe" || t.find("specialite") != string::npos)) {
             colonnes.filiere = i;
+        } else if (!colonnes.type
+                   && (t == "type" || t.find("typede") == 0 || t.find("pratique") != string::npos
+                       || t.find("categorie") != string::npos || t == "loisircompetition"
+                       || t == "competitionloisir")) {
+            colonnes.type = i;
         }
     }
     return colonnes;
@@ -250,6 +255,16 @@ ListeJoueurs::Lecture ListeJoueurs::lireTexteCsv(string contenu)
         joueur.nom = cellule(ligne, colonnes.nom);
         joueur.prenom = cellule(ligne, colonnes.prenom);
         joueur.filiere = cellule(ligne, colonnes.filiere);
+
+        const string type = normaliserTitre(cellule(ligne, colonnes.type));
+        if (type.find("comp") != string::npos) {
+            joueur.typeJoueur = "competition";
+        } else if (type.find("lois") != string::npos) {
+            joueur.typeJoueur = "loisir";
+        } else if (!type.empty()) {
+            lecture.avertissements.push_back("Ligne " + to_string(i + 1) + " : type \""
+                + cellule(ligne, colonnes.type) + "\" non reconnu (attendu : loisir ou competition), ignore.");
+        }
 
         const string numeroLigne = "Ligne " + to_string(i + 1);
         if (joueur.numeroLicence.empty() || joueur.nom.empty()) {

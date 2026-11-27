@@ -113,7 +113,23 @@ Json versJson(const Utilisateur& u)
         {"filiere", u.getFiliere()},
         {"admin", u.estAdmin()},
         {"compteActive", u.compteActive()},
+        {"typeJoueur", typeJoueurVersTexte(u.typeJoueur())},
+        {"typeDeclare", typeJoueurVersTexte(u.getTypeDeclare())},
+        {"dansUneEquipe", u.estDansUneEquipe()},
     };
+}
+
+// Lit les champs d'une seance envoyes par le formulaire.
+ParametresSeance lireSeance(const Json& corps)
+{
+    ParametresSeance parametres;
+    parametres.dateHeure = texte(corps, "dateHeure");
+    parametres.lieu = texte(corps, "lieu");
+    parametres.equipeId = entierFacultatif(corps, "equipeId");
+    parametres.description = texte(corps, "description");
+    parametres.type = typeSeanceDepuisTexte(texte(corps, "type"));
+    parametres.places = entierFacultatif(corps, "places").value_or(50);
+    return parametres;
 }
 
 string texteResultatScan(ResultatScan resultat)
@@ -133,9 +149,11 @@ Json feuilleVersJson(const vector<LignePresence>& feuille)
     Json absents = Json::array();
     for (const LignePresence& ligne : feuille) {
         if (ligne.estPresent()) {
-            presents.push_back({{"id", ligne.utilisateurId}, {"nom", ligne.nomComplet}, {"heure", ligne.heureScan}});
+            presents.push_back({{"id", ligne.utilisateurId}, {"nom", ligne.nomComplet}, {"heure", ligne.heureScan},
+                                {"competition", ligne.competition}});
         } else {
-            absents.push_back({{"id", ligne.utilisateurId}, {"nom", ligne.nomComplet}});
+            absents.push_back({{"id", ligne.utilisateurId}, {"nom", ligne.nomComplet},
+                               {"competition", ligne.competition}});
         }
     }
     return {{"presents", presents}, {"absents", absents}, {"inscrits", feuille.size()}};
@@ -343,7 +361,14 @@ void ServeurWeb::declarerRoutes()
         Json liste = Json::array();
         for (const Entrainement& e : m_entrainements.tous()) {
             const auto s = stats.find(e.getId());
+            const int nbInscrits = s != stats.end() ? s->second.inscrits : 0;
+            const optional<string> refus = e.raisonRefusInscription(membre, nbInscrits);
             Json ligne = {
+                {"type", typeSeanceVersTexte(e.getType())},
+                {"places", e.getPlaces()},
+                {"ouvertureCompetition", e.getOuvertureCompetition()},
+                {"commencee", e.estCommencee()},
+                {"refusInscription", refus ? Json(*refus) : Json(nullptr)},
                 {"id", e.getId()},
                 {"dateHeure", e.getDateHeure()},
                 {"lieu", e.getLieu()},
@@ -360,16 +385,12 @@ void ServeurWeb::declarerRoutes()
     });
 
     route("POST", R"(/api/entrainements)", [this](Contexte& c) {
-        const Json corps = lireCorps(c.requete);
-        const Entrainement e = m_entrainements.creer(c.connecte(), texte(corps, "dateHeure"), texte(corps, "lieu"),
-                                                     entierFacultatif(corps, "equipeId"), texte(corps, "description"));
+        const Entrainement e = m_entrainements.creer(c.connecte(), lireSeance(lireCorps(c.requete)));
         envoyerJson(c.reponse, {{"id", e.getId()}}, 201);
     });
 
     route("PUT", R"(/api/entrainements/(\d+))", [this](Contexte& c) {
-        const Json corps = lireCorps(c.requete);
-        m_entrainements.modifier(c.connecte(), c.parametre(1), texte(corps, "dateHeure"), texte(corps, "lieu"),
-                                 entierFacultatif(corps, "equipeId"), texte(corps, "description"));
+        m_entrainements.modifier(c.connecte(), c.parametre(1), lireSeance(lireCorps(c.requete)));
         envoyerJson(c.reponse, {{"ok", true}});
     });
 
@@ -379,8 +400,20 @@ void ServeurWeb::declarerRoutes()
     });
 
     route("POST", R"(/api/entrainements/(\d+)/inscription)", [this](Contexte& c) {
-        m_entrainements.inscrire(c.parametre(1), c.connecte().getId());
+        m_entrainements.inscrire(c.parametre(1), c.connecte());
         envoyerJson(c.reponse, {{"ok", true}});
+    });
+
+    // Gestion de la liste des inscrits par un admin.
+    route("POST", R"(/api/entrainements/(\d+)/inscrits)", [this](Contexte& c) {
+        m_entrainements.ajouterInscrit(c.connecte(), c.parametre(1),
+                                       lireCorps(c.requete).at("utilisateurId").get<int>());
+        envoyerJson(c.reponse, feuilleVersJson(m_entrainements.feuilleDePresence(c.parametre(1))));
+    });
+
+    route("DELETE", R"(/api/entrainements/(\d+)/inscrits/(\d+))", [this](Contexte& c) {
+        m_entrainements.retirerInscrit(c.connecte(), c.parametre(1), c.parametre(2));
+        envoyerJson(c.reponse, feuilleVersJson(m_entrainements.feuilleDePresence(c.parametre(1))));
     });
 
     route("DELETE", R"(/api/entrainements/(\d+)/inscription)", [this](Contexte& c) {
@@ -538,7 +571,8 @@ void ServeurWeb::declarerRoutes()
         Json apercu = Json::array();
         for (size_t i = 0; i < lecture.joueurs.size() && i < 5; ++i) {
             const JoueurImporte& j = lecture.joueurs[i];
-            apercu.push_back({{"licence", j.numeroLicence}, {"nom", j.nom}, {"prenom", j.prenom}, {"filiere", j.filiere}});
+            apercu.push_back({{"licence", j.numeroLicence}, {"nom", j.nom}, {"prenom", j.prenom},
+                              {"filiere", j.filiere}, {"type", j.typeJoueur}});
         }
         reponse["apercu"] = apercu;
 
@@ -553,6 +587,15 @@ void ServeurWeb::declarerRoutes()
     route("PUT", R"(/api/membres/(\d+)/statut)", [this](Contexte& c) {
         const bool admin = lireCorps(c.requete).at("admin").get<bool>();
         m_utilisateurs.changerStatut(c.connecte(), c.parametre(1), admin ? Statut::Admin : Statut::Client);
+        envoyerJson(c.reponse, {{"ok", true}});
+    });
+
+    route("PUT", R"(/api/membres/(\d+)/type)", [this](Contexte& c) {
+        const string type = texte(lireCorps(c.requete), "type");
+        if (type != "loisir" && type != "competition") {
+            throw DonneeInvalide("Type attendu : loisir ou competition.");
+        }
+        m_utilisateurs.changerTypeJoueur(c.connecte(), c.parametre(1), typeJoueurDepuisTexte(type));
         envoyerJson(c.reponse, {{"ok", true}});
     });
 

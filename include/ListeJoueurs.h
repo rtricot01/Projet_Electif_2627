@@ -15,6 +15,8 @@
 //   - "Nom"                                 -> nom (obligatoire)
 //   - "Prenom"                              -> prenom
 //   - "Filiere" / "Departement" / "Spe"     -> filiere
+//   - "Type" / "Pratique" / "Categorie"     -> loisir ou competition (valeurs contenant
+//                                              "lois" ou "comp", ex : "Loisir", "Compétition")
 // Les autres colonnes sont ignorees.
 class ListeJoueurs {
 public:

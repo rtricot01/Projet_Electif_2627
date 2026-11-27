@@ -20,11 +20,22 @@ Statut statutDepuisTexte(const string& texte)
     return texte == "admin" ? Statut::Admin : Statut::Client;
 }
 
+string typeJoueurVersTexte(TypeJoueur type)
+{
+    return type == TypeJoueur::Competition ? "competition" : "loisir";
+}
+
+TypeJoueur typeJoueurDepuisTexte(const string& texte)
+{
+    return texte == "competition" ? TypeJoueur::Competition : TypeJoueur::Loisir;
+}
+
 // ---------------------------------------------------------------- Utilisateur
 
 // Liste d'initialisation : les attributs sont remplis directement.
 Utilisateur::Utilisateur(int id, string numeroLicence, string nom, string prenom,
-                         string filiere, Statut statut, string qrToken, bool compteActive)
+                         string filiere, Statut statut, string qrToken, bool compteActive,
+                         TypeJoueur typeDeclare, bool dansUneEquipe)
     : m_id(id),
       m_numeroLicence(std::move(numeroLicence)),
       m_nom(std::move(nom)),
@@ -32,8 +43,16 @@ Utilisateur::Utilisateur(int id, string numeroLicence, string nom, string prenom
       m_filiere(std::move(filiere)),
       m_statut(statut),
       m_qrToken(std::move(qrToken)),
-      m_compteActive(compteActive)
+      m_compteActive(compteActive),
+      m_typeDeclare(typeDeclare),
+      m_dansUneEquipe(dansUneEquipe)
 {
+}
+
+TypeJoueur Utilisateur::typeJoueur() const
+{
+    return (m_typeDeclare == TypeJoueur::Competition || m_dansUneEquipe) ? TypeJoueur::Competition
+                                                                         : TypeJoueur::Loisir;
 }
 
 string Utilisateur::nomComplet() const
@@ -55,7 +74,8 @@ string Utilisateur::contenuQrCode() const
 namespace {
 
 const char* COLONNES =
-    "id, numero_licence, nom, prenom, filiere, statut, qr_token, password IS NOT NULL AS compte_active";
+    "id, numero_licence, nom, prenom, filiere, statut, qr_token, password IS NOT NULL AS compte_active, "
+    "type_joueur, EXISTS (SELECT 1 FROM equipe_membres m WHERE m.utilisateur_id = utilisateurs.id) AS en_equipe";
 
 Utilisateur depuisLigne(const pqxx::row& ligne)
 {
@@ -66,7 +86,9 @@ Utilisateur depuisLigne(const pqxx::row& ligne)
                        ligne["filiere"].as<string>(),
                        statutDepuisTexte(ligne["statut"].as<string>()),
                        ligne["qr_token"].as<string>(),
-                       ligne["compte_active"].as<bool>());
+                       ligne["compte_active"].as<bool>(),
+                       typeJoueurDepuisTexte(ligne["type_joueur"].as<string>()),
+                       ligne["en_equipe"].as<bool>());
 }
 
 void verifierMotDePasse(const string& motDePasse)
@@ -127,13 +149,16 @@ ResultatImport UtilisateurManager::importerJoueurs(const Utilisateur& auteur, co
     ResultatImport resultat;
     for (const JoueurImporte& joueur : joueurs) {
         // xmax = 0 signifie que la ligne vient d'etre inseree (et pas mise a jour).
+        // Une case vide dans le fichier (filiere, type) ne remplace pas ce qui est deja connu.
         const bool ajoute = db::exec(tx,
-            "INSERT INTO utilisateurs (numero_licence, nom, prenom, filiere) VALUES ($1, $2, $3, $4) "
+            "INSERT INTO utilisateurs (numero_licence, nom, prenom, filiere, type_joueur) "
+            "VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'loisir')) "
             "ON CONFLICT (numero_licence) DO UPDATE SET "
             "  nom = EXCLUDED.nom, prenom = EXCLUDED.prenom, "
-            "  filiere = CASE WHEN EXCLUDED.filiere = '' THEN utilisateurs.filiere ELSE EXCLUDED.filiere END "
+            "  filiere = CASE WHEN $4 = '' THEN utilisateurs.filiere ELSE EXCLUDED.filiere END, "
+            "  type_joueur = CASE WHEN $5 = '' THEN utilisateurs.type_joueur ELSE EXCLUDED.type_joueur END "
             "RETURNING (xmax = 0) AS ajoute;",
-            joueur.numeroLicence, joueur.nom, joueur.prenom, joueur.filiere)[0][0].as<bool>();
+            joueur.numeroLicence, joueur.nom, joueur.prenom, joueur.filiere, joueur.typeJoueur)[0][0].as<bool>();
         ajoute ? ++resultat.ajoutes : ++resultat.misAJour;
     }
     tx.commit();
@@ -256,6 +281,19 @@ void UtilisateurManager::changerStatut(const Utilisateur& auteur, int utilisateu
     pqxx::connection conn(m_connexion);
     pqxx::work tx(conn);
     db::exec(tx, "UPDATE utilisateurs SET statut = $1 WHERE id = $2;", statutVersTexte(statut), utilisateurId);
+    tx.commit();
+}
+
+void UtilisateurManager::changerTypeJoueur(const Utilisateur& auteur, int utilisateurId, TypeJoueur type)
+{
+    exigerAdmin(auteur, "changer le type d'un joueur");
+
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+    if (db::exec(tx, "UPDATE utilisateurs SET type_joueur = $1 WHERE id = $2;",
+                 typeJoueurVersTexte(type), utilisateurId).affected_rows() == 0) {
+        throw DonneeInvalide("Ce membre n'existe pas.");
+    }
     tx.commit();
 }
 

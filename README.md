@@ -64,6 +64,8 @@ sur toutes les modifications (protection CSRF), droits admin verifies par les cl
    *Membres du club > Importer la liste des joueurs*. La premiere ligne doit contenir les titres des
    colonnes : au moins `Nom` et `Licence` (`Prenom` et `Filiere` sont aussi reconnus, les autres colonnes
    sont ignorees). On peut reimporter la liste mise a jour a tout moment : les comptes existants sont gardes.
+   Une colonne `Type` (valeurs *Loisir* / *Competition*) indique la pratique du joueur.
+   Un joueur qui fait partie d'une equipe est toujours considere comme *competition*.
 3. **Premiere connexion** : le joueur saisit son numero de licence et choisit son mot de passe.
 4. **Connexions suivantes** : numero de licence + mot de passe, puis inscription aux seances.
 5. **Mot de passe oublie** : un admin le reinitialise (*Membres du club*), le joueur en choisit un nouveau.
@@ -84,6 +86,17 @@ sur toutes les modifications (protection CSRF), droits admin verifies par les cl
 
 Les regles (droits admin, verifications) sont dans les classes `*Manager`, pas dans les menus :
 le futur site web pourra les reutiliser telles quelles.
+
+## Inscriptions aux seances
+
+- Chaque seance a un nombre de places (50 par defaut, modifiable). Quand c'est complet, les joueurs
+  ne peuvent plus s'inscrire ; un admin peut toujours ajouter ou retirer des joueurs (page *Inscrits*).
+- Type de seance, choisi par l'admin :
+  - **Ouverte a tous** ;
+  - **Semaine A** : les joueurs loisirs s'inscrivent des la creation, les joueurs competition
+    seulement 48 h avant la seance (`Entrainement::HEURES_PRIORITE_LOISIRS`) ;
+  - **Semaine B** : uniquement les joueurs competition.
+- La base est reglee sur le fuseau `Europe/Paris` au demarrage (Neon est en UTC par defaut).
 
 ## Presences par QR code
 
