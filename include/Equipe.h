@@ -37,6 +37,10 @@ public:
 
     explicit EquipeManager(std::string connexion);
 
+    // Type de l'image ("image/jpeg", "image/png", "image/webp") d'apres ses premiers octets,
+    // ou "" si ce n'est pas une image acceptee.
+    static std::string typeImage(const std::string& contenu);
+
     Equipe creer(const Utilisateur& auteur, const std::string& nom, const std::vector<int>& membres);
     void modifier(const Utilisateur& auteur, int equipeId, const std::string& nom, const std::vector<int>& membres);
     void supprimer(const Utilisateur& auteur, int equipeId);
@@ -46,6 +50,10 @@ public:
 
     // La photo est stockee directement dans la base (les photos ne sont pas en ligne).
     void definirPhoto(const Utilisateur& auteur, int equipeId, const std::string& cheminFichier);
+    // Meme chose a partir du contenu de l'image (envoi depuis le site web).
+    void definirPhotoDepuisOctets(const Utilisateur& auteur, int equipeId, const std::string& contenu);
+    // Contenu de la photo (rien si l'equipe n'a pas de photo).
+    std::optional<std::string> photo(int equipeId);
     // Ecrit la photo de l'equipe dans un fichier. Renvoie false si l'equipe n'a pas de photo.
     bool exporterPhoto(int equipeId, const std::string& cheminFichier);
 };

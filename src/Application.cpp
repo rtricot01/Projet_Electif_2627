@@ -5,6 +5,7 @@
 #include <pqxx/pqxx>
 #include <sstream>
 
+#include "ListeJoueurs.h"
 #include "QrCode.h"
 
 using namespace std;
@@ -34,8 +35,9 @@ void Application::lancer()
 {
     try {
         afficherMenu("AS VOLLEY - ACCUEIL", {
-            {"S'inscrire", [this] { inscription(); }},
-            {"Se connecter", [this] { connexion(); }},
+            {"Se connecter (premiere connexion : avec votre numero de licence)", [this] { connexion(); }},
+            {"Creer le compte administrateur du club", [this] { creerCompteAdmin(); }, false,
+             [this] { return !m_utilisateurs.existeUnAdmin(); }},
         });
     } catch (const FinDeSaisie&) {
         cout << '\n';
@@ -51,7 +53,7 @@ void Application::afficherMenu(const string& titreMenu, const vector<Option>& op
     while (true) {
         vector<const Option*> visibles;
         for (const Option& option : options) {
-            if (!option.adminSeulement || estAdmin()) {
+            if ((!option.adminSeulement || estAdmin()) && (!option.condition || option.condition())) {
                 visibles.push_back(&option);
             }
         }
@@ -85,48 +87,92 @@ void Application::afficherMenu(const string& titreMenu, const vector<Option>& op
     }
 }
 
-void Application::inscription()
-{
-    titre("INSCRIPTION");
-    const string licence = lireTexte("Numero de licence (servira d'identifiant)");
-    const string motDePasse = lireTexte("Mot de passe");
-    const string nom = lireTexte("Nom");
-    const string prenom = lireTexte("Prenom");
-    const string filiere = lireTexte("Filiere a l'INSA (ex : GC, GE, GM, MIQ, Archi...)");
-
-    if (licence.empty() || motDePasse.empty() || nom.empty() || prenom.empty()) {
-        throw DonneeInvalide("Licence, mot de passe, nom et prenom sont obligatoires.");
-    }
-
-    const optional<Utilisateur> cree = m_utilisateurs.inscrire(licence, motDePasse, nom, prenom, filiere);
-    if (!cree) {
-        cout << "Echec : ce numero de licence a deja un compte.\n";
-        return;
-    }
-    cout << "Compte cree avec succes !";
-    if (cree->estAdmin()) {
-        cout << " (premier compte du club : vous etes admin)";
-    }
-    cout << '\n';
-}
-
+// Une seule entree pour tout le monde : le programme regarde si la licence
+// a deja un mot de passe. Si non, c'est la premiere connexion du joueur.
 void Application::connexion()
 {
     titre("CONNEXION");
     const string licence = lireTexte("Numero de licence");
-    const string motDePasse = lireTexte("Mot de passe");
 
-    m_connecte = m_utilisateurs.connecter(licence, motDePasse);
+    switch (m_utilisateurs.etatCompte(licence)) {
+    case EtatCompte::LicenceInconnue:
+        cout << "Ce numero de licence n'est pas dans la liste du club. Verifiez-le ou contactez un responsable.\n";
+        return;
+    case EtatCompte::AActiver:
+        premiereConnexion(licence);
+        break;
+    case EtatCompte::DejaActive:
+        m_connecte = m_utilisateurs.connecter(licence, lireTexte("Mot de passe"));
+        if (!m_connecte) {
+            cout << "Mot de passe incorrect. Si vous l'avez oublie, demandez a un responsable de le reinitialiser.\n";
+            return;
+        }
+        break;
+    }
     if (!m_connecte) {
-        cout << "Identifiants invalides.\n";
         return;
     }
+
     cout << "\nConnexion reussie ! Bienvenue " << m_connecte->nomComplet()
          << " (" << statutVersTexte(m_connecte->getStatut()) << ").\n";
-
     menuPrincipal();
     m_connecte.reset();
     cout << "Vous etes deconnecte.\n";
+}
+
+void Application::premiereConnexion(const string& licence)
+{
+    titre("PREMIERE CONNEXION");
+    cout << "Bienvenue ! Choisissez le mot de passe que vous utiliserez pour vos prochaines connexions.\n";
+    const string motDePasse = choisirMotDePasse();
+    if (motDePasse.empty()) {
+        return;
+    }
+    m_connecte = m_utilisateurs.activerCompte(licence, motDePasse);
+    if (!m_connecte) {
+        cout << "Ce compte a deja ete active. Connectez-vous avec votre mot de passe.\n";
+        return;
+    }
+    cout << "Compte active.\n";
+}
+
+// Demande le mot de passe deux fois. Renvoie "" si les deux saisies sont differentes.
+string Application::choisirMotDePasse()
+{
+    const string motDePasse = lireTexte("Nouveau mot de passe (" +
+        to_string(UtilisateurManager::LONGUEUR_MIN_MOT_DE_PASSE) + " caracteres minimum)");
+    if (motDePasse.size() < UtilisateurManager::LONGUEUR_MIN_MOT_DE_PASSE) {
+        cout << "Mot de passe trop court.\n";
+        return "";
+    }
+    if (lireTexte("Confirmez le mot de passe") != motDePasse) {
+        cout << "Les deux mots de passe sont differents.\n";
+        return "";
+    }
+    return motDePasse;
+}
+
+// Visible uniquement tant que le club n'a aucun admin (installation du programme).
+void Application::creerCompteAdmin()
+{
+    titre("COMPTE ADMINISTRATEUR");
+    const string licence = lireTexte("Numero de licence");
+    const string nom = lireTexte("Nom");
+    const string prenom = lireTexte("Prenom");
+    const string filiere = lireTexte("Filiere a l'INSA");
+    if (licence.empty() || nom.empty() || prenom.empty()) {
+        throw DonneeInvalide("Licence, nom et prenom sont obligatoires.");
+    }
+    const string motDePasse = choisirMotDePasse();
+    if (motDePasse.empty()) {
+        return;
+    }
+    if (m_utilisateurs.creerPremierAdmin(licence, motDePasse, nom, prenom, filiere)) {
+        cout << "Compte administrateur cree. Connectez-vous, puis importez la liste des joueurs "
+                "(Membres du club > Importer).\n";
+    } else {
+        cout << "Echec : ce numero de licence a deja un compte.\n";
+    }
 }
 
 void Application::menuPrincipal()
@@ -155,6 +201,8 @@ void Application::menuPrincipal()
                 {"Me desinscrire d'un entrainement", [this] { seDesinscrireEntrainement(); }},
                 {"Scanner les QR codes (valider les presences)", [this] { scannerPresences(); }, true},
                 {"Voir les presences d'une seance", [this] { voirPresences(); }, true},
+                {"Ajouter un joueur a une seance", [this] { ajouterInscrit(); }, true},
+                {"Retirer un joueur d'une seance", [this] { retirerInscrit(); }, true},
                 {"Creer un entrainement", [this] { creerEntrainement(); }, true},
                 {"Modifier un entrainement", [this] { modifierEntrainement(); }, true},
                 {"Supprimer un entrainement", [this] { supprimerEntrainement(); }, true},
@@ -172,6 +220,8 @@ void Application::menuPrincipal()
         {"Membres du club", [this] {
             afficherMenu("MEMBRES", {
                 {"Voir les membres", [this] { afficherMembres(); }},
+                {"Importer la liste des joueurs (fichier CSV enregistre depuis Excel)", [this] { importerJoueurs(); }},
+                {"Reinitialiser le mot de passe d'un membre", [this] { reinitialiserMotDePasse(); }},
                 {"Passer un membre admin / client", [this] { changerStatutMembre(); }},
                 {"Supprimer un compte", [this] { supprimerMembre(); }},
             });
@@ -231,7 +281,55 @@ void Application::afficherMembres()
         cout << "[" << u.getId() << "] " << u.nomComplet()
              << " - licence " << u.getNumeroLicence()
              << " - " << (u.getFiliere().empty() ? "filiere ?" : u.getFiliere())
-             << (u.estAdmin() ? " - ADMIN" : "") << '\n';
+             << (u.estAdmin() ? " - ADMIN" : "")
+             << " - " << typeJoueurVersTexte(u.typeJoueur()) << (u.estDansUneEquipe() ? " (equipe)" : "")
+             << (u.compteActive() ? "" : " - compte pas encore active") << '\n';
+    }
+}
+
+void Application::importerJoueurs()
+{
+    titre("IMPORTER LA LISTE DES JOUEURS");
+    cout << "Dans Excel : Fichier > Enregistrer sous > \"CSV UTF-8\" (ou \"CSV (separateur : point-virgule)\").\n"
+         << "La premiere ligne doit contenir les titres des colonnes, au moins \"Nom\" et \"Licence\"\n"
+         << "(\"Prenom\" et \"Filiere\" sont aussi reconnus).\n";
+    const string chemin = lireTexte("Chemin du fichier CSV");
+    const ListeJoueurs::Lecture lecture = ListeJoueurs::lireFichierCsv(chemin);
+
+    for (const string& avertissement : lecture.avertissements) {
+        cout << "  ! " << avertissement << '\n';
+    }
+    if (lecture.joueurs.empty()) {
+        cout << "Aucun joueur trouve dans le fichier.\n";
+        return;
+    }
+
+    cout << lecture.joueurs.size() << " joueur(s) trouve(s), par exemple :\n";
+    for (size_t i = 0; i < lecture.joueurs.size() && i < 3; ++i) {
+        const JoueurImporte& j = lecture.joueurs[i];
+        cout << "  - " << j.prenom << " " << j.nom << " (licence " << j.numeroLicence
+             << (j.filiere.empty() ? "" : ", " + j.filiere) << ")\n";
+    }
+    if (!confirmer("Importer ces joueurs ?")) {
+        cout << "Import annule.\n";
+        return;
+    }
+
+    const ResultatImport resultat = m_utilisateurs.importerJoueurs(*m_connecte, lecture.joueurs);
+    cout << resultat.ajoutes << " joueur(s) ajoute(s), " << resultat.misAJour << " deja present(s) mis a jour.\n"
+         << "Les nouveaux joueurs se connectent avec leur numero de licence et choisissent leur mot de passe.\n";
+}
+
+void Application::reinitialiserMotDePasse()
+{
+    afficherMembres();
+    const optional<int> id = lireEntier("Numero du membre");
+    if (!id) {
+        return;
+    }
+    if (confirmer("Effacer le mot de passe de " + nomJoueur(*id) + " ?")) {
+        m_utilisateurs.reinitialiserMotDePasse(*m_connecte, *id);
+        cout << "Mot de passe efface : a sa prochaine connexion, ce membre en choisira un nouveau.\n";
     }
 }
 
@@ -358,9 +456,11 @@ void Application::afficherEntrainements()
     }
     for (const Entrainement& e : entrainements) {
         const StatistiquesPresence stats = m_entrainements.statistiques(e.getId());
+        const char* type = e.getType() == TypeSeance::A ? " - semaine A (priorite loisirs)"
+                         : e.getType() == TypeSeance::B ? " - semaine B (competition)" : "";
         cout << "[" << e.getId() << "] " << e.getDateHeure() << " - " << e.getLieu()
-             << " - " << nomEquipe(e.getEquipeId())
-             << " - " << stats.inscrits << " inscrit(s)"
+             << " - " << nomEquipe(e.getEquipeId()) << type
+             << " - " << stats.inscrits << "/" << e.getPlaces() << " inscrit(s)"
              << (m_entrainements.estInscrit(e.getId(), m_connecte->getId()) ? " (vous etes inscrit)" : "") << '\n';
         if (!e.getDescription().empty()) {
             cout << "     " << e.getDescription() << '\n';
@@ -371,12 +471,15 @@ void Application::afficherEntrainements()
 void Application::creerEntrainement()
 {
     titre("CREER UN ENTRAINEMENT");
-    const string dateHeure = lireTexte("Date et heure (AAAA-MM-JJ HH:MM)");
-    const string lieu = lireTexte("Lieu");
-    const optional<int> equipe = choisirEquipe(true);
-    const string description = lireTexte("Description (facultatif)");
+    ParametresSeance parametres;
+    parametres.dateHeure = lireTexte("Date et heure (AAAA-MM-JJ HH:MM)");
+    parametres.lieu = lireTexte("Lieu");
+    parametres.equipeId = choisirEquipe(true);
+    parametres.description = lireTexte("Description (facultatif)");
+    parametres.type = choisirTypeSeance(TypeSeance::Ouverte);
+    parametres.places = lireEntier("Nombre de places [50]").value_or(50);
 
-    const Entrainement e = m_entrainements.creer(*m_connecte, dateHeure, lieu, equipe, description);
+    const Entrainement e = m_entrainements.creer(*m_connecte, parametres);
     cout << "Entrainement cree (n" << e.getId() << "), "
          << m_entrainements.statistiques(e.getId()).inscrits << " joueur(s) inscrit(s) automatiquement.\n";
 }
@@ -392,11 +495,14 @@ void Application::modifierEntrainement()
     if (!e) {
         throw DonneeInvalide("Cet entrainement n'existe pas.");
     }
-    const string dateHeure = lireTexte("Date et heure (AAAA-MM-JJ HH:MM)", e->getDateHeure());
-    const string lieu = lireTexte("Lieu", e->getLieu());
-    const optional<int> equipe = choisirEquipe(true, e->getEquipeId());
-    const string description = lireTexte("Description", e->getDescription());
-    m_entrainements.modifier(*m_connecte, *id, dateHeure, lieu, equipe, description);
+    ParametresSeance parametres = e->getParametres();
+    parametres.dateHeure = lireTexte("Date et heure (AAAA-MM-JJ HH:MM)", e->getDateHeure());
+    parametres.lieu = lireTexte("Lieu", e->getLieu());
+    parametres.equipeId = choisirEquipe(true, e->getEquipeId());
+    parametres.description = lireTexte("Description", e->getDescription());
+    parametres.type = choisirTypeSeance(e->getType());
+    parametres.places = lireEntier("Nombre de places [" + to_string(e->getPlaces()) + "]").value_or(e->getPlaces());
+    m_entrainements.modifier(*m_connecte, *id, parametres);
     cout << "Entrainement modifie.\n";
 }
 
@@ -420,7 +526,8 @@ void Application::sInscrireEntrainement()
     if (!id) {
         return;
     }
-    m_entrainements.inscrire(*id, m_connecte->getId());
+    rechargerUtilisateurConnecte(); // type loisir / competition a jour
+    m_entrainements.inscrire(*id, *m_connecte);
     cout << "Vous etes inscrit.\n";
 }
 
@@ -433,6 +540,55 @@ void Application::seDesinscrireEntrainement()
     }
     m_entrainements.desinscrire(*id, m_connecte->getId());
     cout << "Vous etes desinscrit.\n";
+}
+
+// L'admin peut ajouter un joueur meme si la seance est pleine ou reservee.
+void Application::ajouterInscrit()
+{
+    afficherEntrainements();
+    const optional<int> seance = lireEntier("Numero de l'entrainement");
+    if (!seance) {
+        return;
+    }
+    afficherMembres();
+    const optional<int> joueur = lireEntier("Numero du joueur a ajouter");
+    if (!joueur) {
+        return;
+    }
+    m_entrainements.ajouterInscrit(*m_connecte, *seance, *joueur);
+    cout << nomJoueur(*joueur) << " est inscrit.\n";
+}
+
+void Application::retirerInscrit()
+{
+    afficherEntrainements();
+    const optional<int> seance = lireEntier("Numero de l'entrainement");
+    if (!seance) {
+        return;
+    }
+    afficherFeuilleDePresence(*seance);
+    const optional<int> joueur = lireEntier("Numero (id) du joueur a retirer");
+    if (!joueur) {
+        return;
+    }
+    m_entrainements.retirerInscrit(*m_connecte, *seance, *joueur);
+    cout << nomJoueur(*joueur) << " est retire de la seance.\n";
+}
+
+TypeSeance Application::choisirTypeSeance(TypeSeance actuel)
+{
+    const string saisie = lireTexte("Type : 0 = ouverte a tous, A = semaine A (priorite loisirs), "
+                                    "B = semaine B (competition) [" + typeSeanceVersTexte(actuel) + "]");
+    if (saisie == "A" || saisie == "a") {
+        return TypeSeance::A;
+    }
+    if (saisie == "B" || saisie == "b") {
+        return TypeSeance::B;
+    }
+    if (saisie == "0") {
+        return TypeSeance::Ouverte;
+    }
+    return actuel;
 }
 
 // Le responsable scanne le QR code de chaque joueur. Une application de scan
@@ -449,7 +605,8 @@ void Application::scannerPresences()
     }
 
     titre("SCAN DES PRESENCES");
-    cout << "Scannez (ou collez) le contenu de chaque QR code. Ligne vide pour terminer.\n";
+    cout << "Scannez (ou collez) le contenu de chaque QR code.\n"
+         << "Ligne vide pour terminer et afficher la liste des presents.\n";
     while (true) {
         const string contenu = lireTexte("QR code");
         if (contenu.empty()) {
@@ -476,6 +633,9 @@ void Application::scannerPresences()
         const StatistiquesPresence stats = m_entrainements.statistiques(*id);
         cout << "  -> " << stats.presents << " present(s) sur " << stats.inscrits << " inscrit(s)\n";
     }
+
+    // Fin du scan : liste complete des presents avec leurs noms.
+    afficherFeuilleDePresence(*id);
 }
 
 void Application::voirPresences()
@@ -485,20 +645,36 @@ void Application::voirPresences()
     if (!id) {
         return;
     }
+    afficherFeuilleDePresence(*id);
+}
 
-    const vector<int> presents = m_entrainements.presents(*id);
-    const vector<int> inscrits = m_entrainements.inscrits(*id);
-    const StatistiquesPresence stats = m_entrainements.statistiques(*id);
+// Affiche les noms des presents (avec l'heure du scan) puis ceux des absents.
+void Application::afficherFeuilleDePresence(int entrainementId)
+{
+    const vector<LignePresence> feuille = m_entrainements.feuilleDePresence(entrainementId);
+    const auto nbPresents = count_if(feuille.begin(), feuille.end(),
+                                     [](const LignePresence& l) { return l.estPresent(); });
+    const size_t nbAbsents = feuille.size() - static_cast<size_t>(nbPresents);
 
-    titre("PRESENCES");
-    ostringstream taux;
-    taux.precision(0);
-    taux << fixed << stats.taux();
-    cout << stats.presents << " present(s) sur " << stats.inscrits << " inscrit(s) (" << taux.str() << " %)\n";
+    titre("PRESENTS : " + to_string(nbPresents) + " / " + to_string(feuille.size()) + " inscrits");
+    if (nbPresents == 0) {
+        cout << "  (personne n'a encore ete scanne)\n";
+    }
+    int numero = 1;
+    for (const LignePresence& ligne : feuille) {
+        if (ligne.estPresent()) {
+            cout << "  " << numero++ << ". " << ligne.nomComplet << "  (" << ligne.heureScan << ")  [id "
+                 << ligne.utilisateurId << "]\n";
+        }
+    }
 
-    for (int joueurId : inscrits) {
-        const bool present = find(presents.begin(), presents.end(), joueurId) != presents.end();
-        cout << "  [" << (present ? "X" : " ") << "] " << nomJoueur(joueurId) << '\n';
+    if (nbAbsents > 0) {
+        cout << "\nPas encore scannes (" << nbAbsents << ") :\n";
+        for (const LignePresence& ligne : feuille) {
+            if (!ligne.estPresent()) {
+                cout << "  - " << ligne.nomComplet << "  [id " << ligne.utilisateurId << "]\n";
+            }
+        }
     }
 }
 

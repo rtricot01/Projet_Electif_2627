@@ -27,6 +27,7 @@ private:
         std::string libelle;
         std::function<void()> action;
         bool adminSeulement = false;
+        std::function<bool()> condition = nullptr; // option affichee seulement si condition() est vraie
     };
 
     void afficherMenu(const std::string& titre, const std::vector<Option>& options);
@@ -34,8 +35,10 @@ private:
     void rechargerUtilisateurConnecte();
 
     // Accueil
-    void inscription();
     void connexion();
+    void premiereConnexion(const std::string& licence);
+    void creerCompteAdmin();
+    std::string choisirMotDePasse();
     void menuPrincipal();
 
     // Profil
@@ -44,6 +47,8 @@ private:
 
     // Membres (admin)
     void afficherMembres();
+    void importerJoueurs();
+    void reinitialiserMotDePasse();
     void changerStatutMembre();
     void supprimerMembre();
 
@@ -64,6 +69,10 @@ private:
     void seDesinscrireEntrainement();
     void scannerPresences();
     void voirPresences();
+    void ajouterInscrit();
+    void retirerInscrit();
+    TypeSeance choisirTypeSeance(TypeSeance actuel);
+    void afficherFeuilleDePresence(int entrainementId);
 
     // Matchs
     void afficherMatchs();

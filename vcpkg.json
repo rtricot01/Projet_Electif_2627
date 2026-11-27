@@ -7,7 +7,9 @@
       "name": "libpqxx",
       "version>=": "7.10.5"
     },
-    "nayuki-qr-code-generator"
+    "nayuki-qr-code-generator",
+    "cpp-httplib",
+    "nlohmann-json"
   ],
   "overrides": [
     {

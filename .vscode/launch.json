@@ -12,6 +12,18 @@
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.env",
             "preLaunchTask": "Build app"
+        },
+        {
+            "name": "Lancer le site web",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/Debug/site.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env",
+            "preLaunchTask": "Build app"
         }
     ]
 }

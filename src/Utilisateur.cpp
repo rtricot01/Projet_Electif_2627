@@ -20,19 +20,39 @@ Statut statutDepuisTexte(const string& texte)
     return texte == "admin" ? Statut::Admin : Statut::Client;
 }
 
+string typeJoueurVersTexte(TypeJoueur type)
+{
+    return type == TypeJoueur::Competition ? "competition" : "loisir";
+}
+
+TypeJoueur typeJoueurDepuisTexte(const string& texte)
+{
+    return texte == "competition" ? TypeJoueur::Competition : TypeJoueur::Loisir;
+}
+
 // ---------------------------------------------------------------- Utilisateur
 
 // Liste d'initialisation : les attributs sont remplis directement.
 Utilisateur::Utilisateur(int id, string numeroLicence, string nom, string prenom,
-                         string filiere, Statut statut, string qrToken)
+                         string filiere, Statut statut, string qrToken, bool compteActive,
+                         TypeJoueur typeDeclare, bool dansUneEquipe)
     : m_id(id),
       m_numeroLicence(std::move(numeroLicence)),
       m_nom(std::move(nom)),
       m_prenom(std::move(prenom)),
       m_filiere(std::move(filiere)),
       m_statut(statut),
-      m_qrToken(std::move(qrToken))
+      m_qrToken(std::move(qrToken)),
+      m_compteActive(compteActive),
+      m_typeDeclare(typeDeclare),
+      m_dansUneEquipe(dansUneEquipe)
 {
+}
+
+TypeJoueur Utilisateur::typeJoueur() const
+{
+    return (m_typeDeclare == TypeJoueur::Competition || m_dansUneEquipe) ? TypeJoueur::Competition
+                                                                         : TypeJoueur::Loisir;
 }
 
 string Utilisateur::nomComplet() const
@@ -53,7 +73,9 @@ string Utilisateur::contenuQrCode() const
 
 namespace {
 
-const char* COLONNES = "id, numero_licence, nom, prenom, filiere, statut, qr_token";
+const char* COLONNES =
+    "id, numero_licence, nom, prenom, filiere, statut, qr_token, password IS NOT NULL AS compte_active, "
+    "type_joueur, EXISTS (SELECT 1 FROM equipe_membres m WHERE m.utilisateur_id = utilisateurs.id) AS en_equipe";
 
 Utilisateur depuisLigne(const pqxx::row& ligne)
 {
@@ -63,37 +85,131 @@ Utilisateur depuisLigne(const pqxx::row& ligne)
                        ligne["prenom"].as<string>(),
                        ligne["filiere"].as<string>(),
                        statutDepuisTexte(ligne["statut"].as<string>()),
-                       ligne["qr_token"].as<string>());
+                       ligne["qr_token"].as<string>(),
+                       ligne["compte_active"].as<bool>(),
+                       typeJoueurDepuisTexte(ligne["type_joueur"].as<string>()),
+                       ligne["en_equipe"].as<bool>());
+}
+
+void verifierMotDePasse(const string& motDePasse)
+{
+    if (motDePasse.size() < UtilisateurManager::LONGUEUR_MIN_MOT_DE_PASSE) {
+        throw DonneeInvalide("Le mot de passe doit faire au moins "
+                             + to_string(UtilisateurManager::LONGUEUR_MIN_MOT_DE_PASSE) + " caracteres.");
+    }
 }
 
 } // namespace
 
 UtilisateurManager::UtilisateurManager(string connexion) : Manager(std::move(connexion)) {}
 
-optional<Utilisateur> UtilisateurManager::inscrire(const string& numeroLicence, const string& motDePasse,
-                                                   const string& nom, const string& prenom,
-                                                   const string& filiere)
+bool UtilisateurManager::existeUnAdmin()
 {
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+    return tx.exec("SELECT COUNT(*) FROM utilisateurs WHERE statut = 'admin';")[0][0].as<int>() > 0;
+}
+
+optional<Utilisateur> UtilisateurManager::creerPremierAdmin(const string& numeroLicence, const string& motDePasse,
+                                                            const string& nom, const string& prenom,
+                                                            const string& filiere)
+{
+    verifierMotDePasse(motDePasse);
     try {
         pqxx::connection conn(m_connexion);
         pqxx::work tx(conn);
 
-        // S'il n'existe encore aucun admin, le nouveau compte devient admin
-        // (sinon personne ne pourrait creer d'equipe).
-        const bool aucunAdmin =
-            tx.exec("SELECT COUNT(*) FROM utilisateurs WHERE statut = 'admin';")[0][0].as<int>() == 0;
+        // Verrou : deux personnes ne peuvent pas creer le premier admin en meme temps.
+        tx.exec("LOCK TABLE utilisateurs IN SHARE ROW EXCLUSIVE MODE;");
+        if (tx.exec("SELECT COUNT(*) FROM utilisateurs WHERE statut = 'admin';")[0][0].as<int>() > 0) {
+            throw DonneeInvalide("Un compte admin existe deja : demandez-lui de vous donner les droits.");
+        }
 
         // Mot de passe hache (bcrypt) par PostgreSQL : jamais stocke en clair.
         pqxx::result res = db::exec(tx,
             string("INSERT INTO utilisateurs (numero_licence, password, nom, prenom, filiere, statut) "
-                   "VALUES ($1, crypt($2, gen_salt('bf')), $3, $4, $5, $6) RETURNING ") + COLONNES + ";",
-            numeroLicence, motDePasse, nom, prenom, filiere, string(aucunAdmin ? "admin" : "client"));
+                   "VALUES ($1, crypt($2, gen_salt('bf')), $3, $4, $5, 'admin') RETURNING ") + COLONNES + ";",
+            numeroLicence, motDePasse, nom, prenom, filiere);
 
         tx.commit();
         return depuisLigne(res[0]);
     } catch (const pqxx::unique_violation&) {
         return nullopt; // numero de licence deja utilise
     }
+}
+
+ResultatImport UtilisateurManager::importerJoueurs(const Utilisateur& auteur, const vector<JoueurImporte>& joueurs)
+{
+    exigerAdmin(auteur, "importer la liste des joueurs");
+
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+
+    // Tout l'import se fait dans une seule transaction : en cas d'erreur, rien n'est enregistre.
+    ResultatImport resultat;
+    for (const JoueurImporte& joueur : joueurs) {
+        // xmax = 0 signifie que la ligne vient d'etre inseree (et pas mise a jour).
+        // Une case vide dans le fichier (filiere, type) ne remplace pas ce qui est deja connu.
+        const bool ajoute = db::exec(tx,
+            "INSERT INTO utilisateurs (numero_licence, nom, prenom, filiere, type_joueur) "
+            "VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'loisir')) "
+            "ON CONFLICT (numero_licence) DO UPDATE SET "
+            "  nom = EXCLUDED.nom, prenom = EXCLUDED.prenom, "
+            "  filiere = CASE WHEN $4 = '' THEN utilisateurs.filiere ELSE EXCLUDED.filiere END, "
+            "  type_joueur = CASE WHEN $5 = '' THEN utilisateurs.type_joueur ELSE EXCLUDED.type_joueur END "
+            "RETURNING (xmax = 0) AS ajoute;",
+            joueur.numeroLicence, joueur.nom, joueur.prenom, joueur.filiere, joueur.typeJoueur)[0][0].as<bool>();
+        ajoute ? ++resultat.ajoutes : ++resultat.misAJour;
+    }
+    tx.commit();
+    return resultat;
+}
+
+EtatCompte UtilisateurManager::etatCompte(const string& numeroLicence)
+{
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+
+    pqxx::result res = db::exec(tx,
+        "SELECT password IS NOT NULL FROM utilisateurs WHERE numero_licence = $1;", numeroLicence);
+    if (res.empty()) {
+        return EtatCompte::LicenceInconnue;
+    }
+    return res[0][0].as<bool>() ? EtatCompte::DejaActive : EtatCompte::AActiver;
+}
+
+optional<Utilisateur> UtilisateurManager::activerCompte(const string& numeroLicence, const string& motDePasse)
+{
+    verifierMotDePasse(motDePasse);
+
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+
+    // "password IS NULL" : impossible de remplacer le mot de passe d'un compte deja active.
+    pqxx::result res = db::exec(tx,
+        string("UPDATE utilisateurs SET password = crypt($2, gen_salt('bf')) "
+               "WHERE numero_licence = $1 AND password IS NULL RETURNING ") + COLONNES + ";",
+        numeroLicence, motDePasse);
+    tx.commit();
+
+    if (res.empty()) {
+        return nullopt;
+    }
+    return depuisLigne(res[0]);
+}
+
+void UtilisateurManager::reinitialiserMotDePasse(const Utilisateur& auteur, int utilisateurId)
+{
+    exigerAdmin(auteur, "reinitialiser un mot de passe");
+
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+    if (db::exec(tx, "UPDATE utilisateurs SET password = NULL WHERE id = $1;", utilisateurId).affected_rows() == 0) {
+        throw DonneeInvalide("Ce membre n'existe pas.");
+    }
+    // Deconnecte le membre partout (site web).
+    db::exec(tx, "DELETE FROM sessions WHERE utilisateur_id = $1;", utilisateurId);
+    tx.commit();
 }
 
 optional<Utilisateur> UtilisateurManager::connecter(const string& numeroLicence, const string& motDePasse)
@@ -165,6 +281,19 @@ void UtilisateurManager::changerStatut(const Utilisateur& auteur, int utilisateu
     pqxx::connection conn(m_connexion);
     pqxx::work tx(conn);
     db::exec(tx, "UPDATE utilisateurs SET statut = $1 WHERE id = $2;", statutVersTexte(statut), utilisateurId);
+    tx.commit();
+}
+
+void UtilisateurManager::changerTypeJoueur(const Utilisateur& auteur, int utilisateurId, TypeJoueur type)
+{
+    exigerAdmin(auteur, "changer le type d'un joueur");
+
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+    if (db::exec(tx, "UPDATE utilisateurs SET type_joueur = $1 WHERE id = $2;",
+                 typeJoueurVersTexte(type), utilisateurId).affected_rows() == 0) {
+        throw DonneeInvalide("Ce membre n'existe pas.");
+    }
     tx.commit();
 }
 
