@@ -13,6 +13,7 @@ set(SOURCES
     src/Db.cpp
     src/Manager.cpp
     src/Utilisateur.cpp
+    src/ListeJoueurs.cpp
     src/Equipe.cpp
     src/Entrainement.cpp
     src/Match.cpp

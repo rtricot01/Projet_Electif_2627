@@ -51,6 +51,9 @@ void Init::initTables() {
             "  ADD COLUMN IF NOT EXISTS qr_token VARCHAR(64) UNIQUE NOT NULL"
             "      DEFAULT encode(gen_random_bytes(16), 'hex');"
         );
+        // Mot de passe vide (NULL) = joueur importe depuis la liste du club,
+        // qui n'a pas encore fait sa premiere connexion.
+        tx.exec("ALTER TABLE utilisateurs ALTER COLUMN password DROP NOT NULL;");
 
         // ----- Equipes
         tx.exec(

@@ -12,13 +12,24 @@ avec validation des presences par QR code, et matchs (CFE / ACAD) avec le detail
 2. Compiler avec CMake (les dependances `libpqxx` et `nayuki-qr-code-generator` sont installees par vcpkg).
 3. Lancer `app`. Les tables sont creees automatiquement au demarrage.
 
-Le **premier compte cree** devient admin. Un admin peut ensuite donner les droits admin a d'autres membres.
+## Comptes des joueurs
+
+1. **Installation** : tant que le club n'a aucun admin, l'accueil propose *Creer le compte administrateur du club*.
+2. **Import de la liste** : l'admin enregistre le tableau Excel des joueurs en CSV
+   (*Fichier > Enregistrer sous > CSV UTF-8* ou *CSV (separateur : point-virgule)*) puis l'importe via
+   *Membres du club > Importer la liste des joueurs*. La premiere ligne doit contenir les titres des
+   colonnes : au moins `Nom` et `Licence` (`Prenom` et `Filiere` sont aussi reconnus, les autres colonnes
+   sont ignorees). On peut reimporter la liste mise a jour a tout moment : les comptes existants sont gardes.
+3. **Premiere connexion** : le joueur saisit son numero de licence et choisit son mot de passe.
+4. **Connexions suivantes** : numero de licence + mot de passe, puis inscription aux seances.
+5. **Mot de passe oublie** : un admin le reinitialise (*Membres du club*), le joueur en choisit un nouveau.
 
 ## Organisation du code
 
 | Classe | Role |
 |---|---|
-| `Utilisateur` / `UtilisateurManager` | membres : nom, prenom, filiere, numero de licence (identifiant), statut client/admin, QR code personnel |
+| `Utilisateur` / `UtilisateurManager` | membres : nom, prenom, filiere, numero de licence (identifiant), statut client/admin, QR code personnel, activation du compte |
+| `ListeJoueurs` | lecture du fichier CSV exporte d'Excel (liste des joueurs) |
 | `Equipe` / `EquipeManager` | equipes : nom, photo (stockee dans la base), liste des joueurs |
 | `Entrainement` / `EntrainementManager` | seances : date, lieu, inscriptions, presences validees par QR code |
 | `Match` / `MatchManager` | matchs : equipe, adversaire, CFE/ACAD, score set par set |
