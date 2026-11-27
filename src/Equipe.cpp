@@ -61,6 +61,20 @@ vector<int> lireMembres(pqxx::work& tx, int equipeId)
 
 EquipeManager::EquipeManager(string connexion) : Manager(std::move(connexion)) {}
 
+string EquipeManager::typeImage(const string& contenu)
+{
+    if (contenu.rfind("\xFF\xD8\xFF", 0) == 0) {
+        return "image/jpeg";
+    }
+    if (contenu.rfind("\x89PNG\r\n\x1A\n", 0) == 0) {
+        return "image/png";
+    }
+    if (contenu.size() >= 12 && contenu.compare(0, 4, "RIFF") == 0 && contenu.compare(8, 4, "WEBP") == 0) {
+        return "image/webp";
+    }
+    return "";
+}
+
 Equipe EquipeManager::creer(const Utilisateur& auteur, const string& nom, const vector<int>& membres)
 {
     exigerAdmin(auteur, "creer une equipe");
@@ -146,12 +160,21 @@ void EquipeManager::definirPhoto(const Utilisateur& auteur, int equipeId, const 
     if (!fichier) {
         throw DonneeInvalide("Impossible d'ouvrir le fichier \"" + cheminFichier + "\".");
     }
-    const string contenu((istreambuf_iterator<char>(fichier)), istreambuf_iterator<char>());
+    definirPhotoDepuisOctets(auteur, equipeId,
+                             string((istreambuf_iterator<char>(fichier)), istreambuf_iterator<char>()));
+}
+
+void EquipeManager::definirPhotoDepuisOctets(const Utilisateur& auteur, int equipeId, const string& contenu)
+{
+    exigerAdmin(auteur, "changer la photo d'une equipe");
     if (contenu.empty()) {
         throw DonneeInvalide("Le fichier est vide.");
     }
     if (contenu.size() > TAILLE_MAX_PHOTO) {
         throw DonneeInvalide("La photo est trop lourde (5 Mo maximum).");
+    }
+    if (typeImage(contenu).empty()) {
+        throw DonneeInvalide("Le fichier doit etre une image JPEG, PNG ou WebP.");
     }
     const Octets photo(reinterpret_cast<const byte*>(contenu.data()), contenu.size());
 
@@ -163,21 +186,29 @@ void EquipeManager::definirPhoto(const Utilisateur& auteur, int equipeId, const 
     tx.commit();
 }
 
-bool EquipeManager::exporterPhoto(int equipeId, const string& cheminFichier)
+optional<string> EquipeManager::photo(int equipeId)
 {
     pqxx::connection conn(m_connexion);
     pqxx::work tx(conn);
 
     pqxx::result res = db::exec(tx, "SELECT photo FROM equipes WHERE id = $1 AND photo IS NOT NULL;", equipeId);
     if (res.empty()) {
+        return nullopt;
+    }
+    const Octets octets = res[0][0].as<Octets>();
+    return string(reinterpret_cast<const char*>(octets.data()), octets.size());
+}
+
+bool EquipeManager::exporterPhoto(int equipeId, const string& cheminFichier)
+{
+    const optional<string> contenu = photo(equipeId);
+    if (!contenu) {
         return false;
     }
-    const Octets photo = res[0][0].as<Octets>();
-
     ofstream fichier(cheminFichier, ios::binary);
     if (!fichier) {
         throw DonneeInvalide("Impossible d'ecrire le fichier \"" + cheminFichier + "\".");
     }
-    fichier.write(reinterpret_cast<const char*>(photo.data()), static_cast<streamsize>(photo.size()));
+    fichier.write(contenu->data(), static_cast<streamsize>(contenu->size()));
     return true;
 }

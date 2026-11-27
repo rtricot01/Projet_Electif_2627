@@ -278,3 +278,30 @@ vector<LignePresence> EntrainementManager::feuilleDePresence(int entrainementId)
     }
     return feuille;
 }
+
+vector<int> EntrainementManager::inscriptionsDe(int utilisateurId)
+{
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+    return listeIds(tx,
+        "SELECT entrainement_id FROM entrainement_inscriptions WHERE utilisateur_id = $1;", utilisateurId);
+}
+
+map<int, StatistiquesPresence> EntrainementManager::statistiquesParEntrainement()
+{
+    pqxx::connection conn(m_connexion);
+    pqxx::work tx(conn);
+
+    map<int, StatistiquesPresence> resultat;
+    for (const auto& ligne : tx.exec(
+             "SELECT e.id, "
+             "  (SELECT COUNT(*) FROM presences p WHERE p.entrainement_id = e.id), "
+             "  (SELECT COUNT(*) FROM entrainement_inscriptions i WHERE i.entrainement_id = e.id) "
+             "FROM entrainements e;")) {
+        StatistiquesPresence stats;
+        stats.presents = ligne[1].as<int>();
+        stats.inscrits = ligne[2].as<int>();
+        resultat[ligne[0].as<int>()] = stats;
+    }
+    return resultat;
+}

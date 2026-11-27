@@ -120,6 +120,15 @@ void Init::initTables() {
             ");"
         );
 
+        // ----- Sessions du site web (empreinte du jeton stocke dans le cookie)
+        tx.exec(
+            "CREATE TABLE IF NOT EXISTS sessions ("
+            "  empreinte CHAR(64) PRIMARY KEY,"
+            "  utilisateur_id INT NOT NULL REFERENCES utilisateurs(id) ON DELETE CASCADE,"
+            "  expire_le TIMESTAMP NOT NULL"
+            ");"
+        );
+
         tx.commit();
         cout << "[BDD] Tables pretes.\n";
     } catch (const sql_error& e) {

@@ -182,6 +182,8 @@ void UtilisateurManager::reinitialiserMotDePasse(const Utilisateur& auteur, int 
     if (db::exec(tx, "UPDATE utilisateurs SET password = NULL WHERE id = $1;", utilisateurId).affected_rows() == 0) {
         throw DonneeInvalide("Ce membre n'existe pas.");
     }
+    // Deconnecte le membre partout (site web).
+    db::exec(tx, "DELETE FROM sessions WHERE utilisateur_id = $1;", utilisateurId);
     tx.commit();
 }
 

@@ -1,6 +1,7 @@
 #ifndef ENTRAINEMENT_H_INCLUDED
 #define ENTRAINEMENT_H_INCLUDED
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -77,6 +78,8 @@ public:
     void desinscrire(int entrainementId, int utilisateurId);
     bool estInscrit(int entrainementId, int utilisateurId);
     std::vector<int> inscrits(int entrainementId);
+    // Id des entrainements auxquels ce membre est inscrit.
+    std::vector<int> inscriptionsDe(int utilisateurId);
 
     // --- Presences (admin uniquement) ---
     // Le responsable scanne le QR code d'un joueur au debut de la seance.
@@ -85,6 +88,8 @@ public:
                                  const std::string& contenuQr, std::optional<Utilisateur>& joueurScanne);
     std::vector<int> presents(int entrainementId);
     StatistiquesPresence statistiques(int entrainementId);
+    // Statistiques de toutes les seances en une seule requete (cle = id de l'entrainement).
+    std::map<int, StatistiquesPresence> statistiquesParEntrainement();
 
     // Liste des inscrits avec leur nom : d'abord les presents (dans l'ordre des scans),
     // puis les absents (par ordre alphabetique). Une seule requete, meme avec 50 joueurs.

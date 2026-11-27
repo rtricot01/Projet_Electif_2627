@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16325c">
+  <title>AS Volley INSA</title>
+  <link rel="icon" href="icone.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="entete" id="entete" hidden>
+    <div class="entete-titre">
+      <img src="icone.svg" alt="" width="28" height="28">
+      <span>AS Volley</span>
+    </div>
+    <div class="entete-membre">
+      <span id="nom-membre"></span>
+      <button class="bouton-lien" id="bouton-deconnexion" type="button">Déconnexion</button>
+    </div>
+  </header>
+
+  <main id="contenu" class="contenu" aria-live="polite"></main>
+
+  <nav class="onglets" id="onglets" hidden aria-label="Navigation principale">
+    <a href="#/seances" data-onglet="seances"><span class="onglet-icone" aria-hidden="true">📅</span>Séances</a>
+    <a href="#/matchs" data-onglet="matchs"><span class="onglet-icone" aria-hidden="true">🏐</span>Matchs</a>
+    <a href="#/equipes" data-onglet="equipes"><span class="onglet-icone" aria-hidden="true">👥</span>Équipes</a>
+    <a href="#/qr" data-onglet="qr"><span class="onglet-icone" aria-hidden="true">▦</span>Mon QR</a>
+    <a href="#/membres" data-onglet="membres" data-admin hidden><span class="onglet-icone" aria-hidden="true">⚙</span>Membres</a>
+  </nav>
+
+  <dialog id="fenetre" class="fenetre">
+    <form method="dialog" id="fenetre-formulaire">
+      <h2 id="fenetre-titre"></h2>
+      <div id="fenetre-corps"></div>
+      <p class="erreur" id="fenetre-erreur" hidden></p>
+      <div class="fenetre-actions">
+        <button type="button" class="bouton secondaire" id="fenetre-annuler">Annuler</button>
+        <button type="submit" class="bouton" id="fenetre-valider">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="notification" id="notification" role="status" hidden></div>
+
+  <script src="vendor/html5-qrcode.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

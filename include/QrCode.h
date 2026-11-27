@@ -14,6 +14,9 @@ public:
     // Dessine le QR code dans la console (fond sombre conseille).
     static void afficher(const std::string& texte, std::ostream& sortie);
 
+    // Renvoie l'image SVG du QR code (vide si la bibliotheque est absente). Utilise par le site web.
+    static std::string svg(const std::string& texte);
+
     // Enregistre le QR code dans un fichier .svg (imprimable, ou a ouvrir sur le telephone).
     static bool exporterSvg(const std::string& texte, const std::string& cheminFichier);
 };
